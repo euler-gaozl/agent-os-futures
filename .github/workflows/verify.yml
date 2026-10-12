@@ -1,0 +1,45 @@
+name: Independent Web service verification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GOWORK: "off"
+      GOPROXY: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.2
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+      - run: npm install -g pnpm@11.25.0
+      - run: node scripts/check-secrets.mjs
+      - shell: pwsh
+        run: ./scripts/Verify-Ownership.ps1
+      - run: go vet -mod=vendor ./...
+      - if: runner.os == 'Linux'
+        run: go test -mod=vendor -race -count=1 ./...
+      - if: runner.os == 'Windows'
+        run: go test -mod=vendor -count=1 ./...
+      - run: pnpm --dir web install --frozen-lockfile --ignore-scripts
+      - run: pnpm --dir web test
+      - shell: pwsh
+        run: |
+          $package=Join-Path $env:RUNNER_TEMP 'owner-web-release'
+          ./scripts/Package-Web.ps1 -Destination $package
+          ./scripts/Test-RelocatedPackage.ps1 -Package $package
+      - if: runner.os == 'Linux'
+        run: docker build -t agent-os-futures:ci .

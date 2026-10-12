@@ -1,0 +1,13 @@
+{
+  "LISTEN": "127.0.0.1:8098",
+  "SERVICE_TOKEN": "<generated service identity, at least 32 bytes>",
+  "SERVICE_PEERS": "<JSON role to SHA-256 of service token>",
+  "BUSINESS_TOKEN": "<separate user access token, at least 32 bytes>",
+  "DEV_LOCAL": "0",
+  "REGISTRY_URL": "http://127.0.0.1:8096",
+  "RUNTIME_URL": "http://127.0.0.1:8094",
+  "KNOWLEDGE_URL": "http://127.0.0.1:8095",
+  "FUTURES_WEB_DIR": "web/dist",
+  "HTTP_MAX_CONCURRENT": "16",
+  "GOMEMLIMIT": "96MiB"
+}

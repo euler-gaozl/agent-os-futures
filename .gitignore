@@ -1,0 +1,7 @@
+/bin/
+/.local/
+/node_modules/
+/web/node_modules/
+/web/dist/
+*.log
+.env

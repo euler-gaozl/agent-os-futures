@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "role": "futures",
+  "schema": "none",
+  "migration_owner": "none",
+  "backward_compatible": true,
+  "contract": {
+    "http": "agentos-http-v0.6-notes-lifecycle",
+    "data": "none",
+    "tools": [
+      "knowledge_search",
+      "note_save",
+      "artifact_read",
+      "spawn_agent",
+      "sandbox_exec",
+      "document_read",
+      "run_recall",
+      "note_revise",
+      "note_retire"
+    ],
+    "engines": []
+  }
+}
