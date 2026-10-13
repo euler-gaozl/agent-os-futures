@@ -71,6 +71,13 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		webproxy.Proxy(w, r, s.Client.RuntimeURL+"/v1/apps/futures/runs/"+url.PathEscape(r.PathValue("id"))+"/cancel", s.Client.Token)
 	})
+	for _, suffix := range []string{"sources", "sources/record"} {
+		upstream := strings.Replace(suffix, "sources", "evidence", 1)
+		mux.HandleFunc("GET /api/tasks/{id}/"+suffix, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			webproxy.Proxy(w, r, s.Client.RuntimeURL+"/v1/apps/futures/runs/"+url.PathEscape(r.PathValue("id"))+"/"+upstream, s.Client.Token)
+		})
+	}
 	mux.HandleFunc("GET /api/readiness", servicehttp.Wrap(func(w http.ResponseWriter, r *http.Request) error {
 		var credentials, knowledge map[string]any
 		e1 := s.Client.Request(r.Context(), "GET", s.Client.RegistryURL+"/v1/status", nil, &credentials)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Answer } from "./markdown";
+import { ResearchAnswer } from "./evidence";
 import {
   ArrowLeft,
   ArrowUp,
@@ -452,7 +452,7 @@ function Futures() {
               {ready?.knowledge_available ? (
                 <>
                   <BookOpen size={13} />
-                  资料库已连接 · 具体覆盖以本次检索为准
+                  资料库已连接 · 数据覆盖需逐项核对
                 </>
               ) : (
                 <>
@@ -540,7 +540,7 @@ function Futures() {
                         导出记录 <ArrowUpRight size={13} />
                       </button>
                     </div>
-                    <Answer>{result.result}</Answer>
+                    <ResearchAnswer key={result.id} task={result.id}>{result.result}</ResearchAnswer>
                   </article>
                 ) : result.status === "failed" ? (
                   <div className="research-failure">
