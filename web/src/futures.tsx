@@ -449,15 +449,15 @@ function Futures() {
               })}
             </div>
             <div className="research-status-note">
-              {ready?.indexed_documents > 0 ? (
+              {ready?.knowledge_available ? (
                 <>
                   <BookOpen size={13} />
-                  {ready.indexed_documents} 份资料已建立索引
+                  资料库已连接 · 具体覆盖以本次检索为准
                 </>
               ) : (
                 <>
                   <FileText size={13} />
-                  资料库尚未收录研究资料
+                  资料服务暂不可用，请稍后重试
                 </>
               )}
             </div>
