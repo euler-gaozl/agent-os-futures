@@ -80,7 +80,7 @@ function SourceDialog({task, document, close}: {task: string; document: string; 
   const record = part || records.find(x => x.operation_id === selected);
   const meta = record ? sourceDetails(record) : null;
   return <Modal title="阅读原文" close={close} wide>
-    <div className="source-reader">
+    <div className="modal-body source-reader" tabIndex={0} role="region" aria-label="保存的原文">
       {record && <><h3>{record.title}</h3><p className="source-description">任务当时保存的阅读片段。保留原资料中的说法，不代表其已被独立核实。</p>
         <dl className="source-metadata">
           {meta?.published && <><dt>资料标注发布日期</dt><dd>{meta.published}</dd></>}
