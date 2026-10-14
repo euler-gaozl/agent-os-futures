@@ -78,7 +78,12 @@ feedback requires the separate connector configuration described below.
 `check_research_draft_v2` tool. It accepts only a bounded JSON draft string and
 `as_of`, never a run ID or URL, and makes no outbound requests or DB writes.
 It returns the draft hash, validator, repairable issues and source-review issues
-within 8 KiB UTF-8 JSON, with total/truncated counts. It does not return the
+within 5,900 UTF-8 bytes for the complete MCP tool result, including escaped
+JSON text, with total/truncated counts. Each issue keeps its path and code;
+repeated codes reuse the first explanation (`message` is then omitted). The
+notice explains this convention. This stays below Runtime's 6,000-byte archive
+threshold, avoiding repeated artifact paging just to read duplicate guidance.
+It does not return the
 draft, create a report authority, match retained quotations, or claim that the
 caller-supplied date equals a task's pinned date. Runtime retains tool receipts.
 The final Web check still uses that task's actual immutable readings.

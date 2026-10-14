@@ -3,6 +3,7 @@ package futures
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -185,5 +186,48 @@ func TestDraftFeedbackByteLimitAndInvalidIDs(t *testing.T) {
 	b, _ = json.Marshal(out)
 	if len(b) > 8<<10 || !out.IssuesTruncated || out.TotalIssues <= len(out.Revise)+len(out.SourceReview) {
 		t.Fatal("dense feedback was not bounded with accurate counts")
+	}
+	wire, _ := json.Marshal(draftMCPResult(out))
+	if len(wire) > 5900 {
+		t.Fatal("MCP wrapper crossed the runtime inline-result budget")
+	}
+}
+
+func TestRepeatedDraftFindingsRemainInlineWithoutLosingPaths(t *testing.T) {
+	r := exampleReport()
+	r.Facts = nil
+	r.Questions[0].FactIDs = nil
+	for i := 0; i < 17; i++ {
+		f := exampleReport().Facts[0]
+		f.ID = fmt.Sprintf("f%d", i+1)
+		f.Metric, f.Measure, f.Unit = "9月开机率", "capacity", "%"
+		r.Facts = append(r.Facts, f)
+		r.Questions[0].FactIDs = append(r.Questions[0].FactIDs, f.ID)
+	}
+	raw := encodeReport(t, r)
+	expected := checkReport(context.Background(), raw, r.AsOf, nil).Issues
+	out := reviewDraft(context.Background(), raw, r.AsOf)
+	got := append(append([]draftIssue{}, out.Revise...), out.SourceReview...)
+	wire, _ := json.Marshal(draftMCPResult(out))
+	if len(wire) > 5900 || out.IssuesTruncated || len(got) != len(expected) || out.TotalIssues != len(expected) {
+		t.Fatalf("repeated findings lost or archived: bytes=%d returned=%d expected=%d truncated=%t", len(wire), len(got), len(expected), out.IssuesTruncated)
+	}
+	help := map[string]string{}
+	counts := map[string]int{}
+	for _, item := range got {
+		counts[item.Path+":"+item.Code]++
+		if item.Message != "" {
+			if help[item.Code] != "" {
+				t.Fatal("duplicate explanation bloats feedback")
+			}
+			help[item.Code] = item.Message
+		}
+	}
+	for _, item := range expected {
+		key := item.Path + ":" + item.Code
+		if counts[key] < 1 || help[item.Code] != item.Message {
+			t.Fatalf("finding or explanation lost: %s", key)
+		}
+		counts[key]--
 	}
 }

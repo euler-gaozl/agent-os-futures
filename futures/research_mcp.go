@@ -22,38 +22,58 @@ var researchTools = []contracts.Tool{{
 }}
 
 type draftFeedback struct {
-	Validator       string        `json:"validator"`
-	DraftSHA256     string        `json:"draft_sha256"`
-	Phase           string        `json:"phase"`
-	Status          string        `json:"status"`
-	Notice          string        `json:"notice"`
-	Revise          []ReportIssue `json:"revise"`
-	SourceReview    []ReportIssue `json:"source_review"`
-	TotalIssues     int           `json:"total_issues"`
-	IssuesTruncated bool          `json:"issues_truncated"`
+	Validator       string       `json:"validator"`
+	DraftSHA256     string       `json:"draft_sha256"`
+	Phase           string       `json:"phase"`
+	Status          string       `json:"status"`
+	Notice          string       `json:"notice"`
+	Revise          []draftIssue `json:"revise"`
+	SourceReview    []draftIssue `json:"source_review"`
+	TotalIssues     int          `json:"total_issues"`
+	IssuesTruncated bool         `json:"issues_truncated"`
+}
+
+// Repeated issue codes share their first explanation. Keep each affected path,
+// but do not make the Agent page through an archive of duplicate explanations.
+type draftIssue struct {
+	Path    string `json:"path"`
+	Code    string `json:"code"`
+	Message string `json:"message,omitempty"`
+}
+
+func draftMCPResult(feedback draftFeedback) map[string]any {
+	body, _ := json.Marshal(feedback)
+	return map[string]any{"content": []map[string]string{{"type": "text", "text": string(body)}}, "isError": false}
 }
 
 func reviewDraft(ctx context.Context, raw, asOf string) draftFeedback {
 	check := checkReport(ctx, raw, asOf, nil)
 	out := draftFeedback{Validator: check.Validator, DraftSHA256: check.ResultSHA256, Phase: "draft_only", Status: "source_review_required",
-		Notice: "仅检查传入草稿；未核对任务固定日期、阅读回执、原文真实性或资料覆盖。不要修改引用迎合规则或删掉重要事实；查原文处理 source_review。最终结果仍需留存引用核对。",
-		Revise: []ReportIssue{}, SourceReview: []ReportIssue{}, TotalIssues: len(check.Issues)}
+		Notice: "仅检查草稿，未核对任务日期、回执、来源真实性或覆盖。相同 code 共用首项说明。查原文处理 source_review；不要改引文或删关键事实换取通过。最终仍需留存引用核对。",
+		Revise: []draftIssue{}, SourceReview: []draftIssue{}, TotalIssues: len(check.Issues)}
+	seen := map[string]bool{}
 	for _, issue := range check.Issues {
+		item := draftIssue{Path: issue.Path, Code: issue.Code}
+		if !seen[issue.Code] {
+			item.Message = issue.Message
+			seen[issue.Code] = true
+		}
 		switch issue.Code {
 		case "anchor", "period_anchor", "estimate_anchor", "plan_anchor", "comparability", "retained_unchecked":
-			out.SourceReview = append(out.SourceReview, issue)
+			out.SourceReview = append(out.SourceReview, item)
 		default:
-			out.Revise = append(out.Revise, issue)
+			out.Revise = append(out.Revise, item)
 		}
 	}
 	if len(out.Revise) > 0 || out.IssuesTruncated {
 		out.Status = "revision_required"
 	}
-	// Cap actual UTF-8 JSON bytes, not just number of issues. Keep repairable
-	// issues first; the notice always makes missing receipt verification clear.
+	// Runtime archives tool results above 6000 bytes. Count the actual MCP
+	// result including escaped JSON text, with room for transport formatting.
+	// This does not change the immutable historical tool receipts or schemas.
 	for {
-		body, _ := json.Marshal(out)
-		if len(body) <= 8<<10 {
+		body, _ := json.Marshal(draftMCPResult(out))
+		if len(body) <= 5900 {
 			break
 		}
 		out.IssuesTruncated = true
@@ -160,8 +180,7 @@ func researchRPC(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		feedback := reviewDraft(r.Context(), a.Draft, a.AsOf)
-		body, _ := json.Marshal(feedback)
-		respond(map[string]any{"content": []map[string]string{{"type": "text", "text": string(body)}}, "isError": false}, 0, "")
+		respond(draftMCPResult(feedback), 0, "")
 	default:
 		respond(nil, -32601, "method not found")
 	}
