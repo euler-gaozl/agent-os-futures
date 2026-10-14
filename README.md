@@ -26,6 +26,43 @@ labels from the saved source. Source labels are not an independent truth check.
 Only successful document_read receipts are listed; other capture tools are not
 yet represented. A completed task still needs its facts/citations checked.
 
+## Structured research records
+
+New Web tasks pin an `as_of` classification date and the `futures-evidence-v1`
+output contract in Runtime-owned metadata. This date sorts statistical windows;
+it does not establish what was publicly known on that historical day. Older
+clients can omit it, and older Markdown answers remain readable.
+
+`GET /api/tasks/{id}/report-check` is a read-only, app-scoped projection. It
+checks strict bounded JSON, dates, stock/flow/cumulative-flow/capacity labels,
+reported/estimate/plan labels and exact quotations from completed document-read
+receipts. It never reads the current Knowledge library as a substitute. A quote
+match includes the immutable operation/version and Unicode position. The Web
+opens that exact receipt and highlights the quote, including across page bounds;
+failed field checks do not hide an otherwise matching original quotation.
+
+The v1 expression matcher recognizes only direct clauses with adjacent explicit
+date, scope, metric, amount and unit. It does not infer omitted years, carry
+subjects between clauses, or treat distant estimate words as evidence. Other
+wording is preserved with a review flag; it is not evidence that the underlying
+fact is false. The optional arithmetic comparison needs an adjacent pair in the
+same quotation, introduced by an explicit same-basis statement, matching
+measure/unit/scope/nature and disjoint ordered periods. An explicit different-
+basis statement rejects the comparison. This is deliberately limited consistency
+checking, not a general semantic verifier, source authenticity/completeness check,
+stable-sample certification, or independent cross-check. Question/gap text remains
+Agent-generated investigation material even when structural checks pass.
+
+Each response includes the raw-result SHA-256 and validator version. Limits are
+96 KiB JSON, 40 facts, 30 comparisons, 8 questions; retained-source lookup uses at
+most 48 requests / 256 KiB text / 15 seconds and the first 8 receipts per document.
+Budget exhaustion or unsupported format is reported as pending review. The BFF
+does not persist a second report authority. Raw model output is retained by
+Runtime. JSON export bundles the unchanged raw output and the check, including
+source URL/publication/capture labels copied from that retained read; labels
+are not independently verified metadata. Legacy export stays Markdown. No schema/config
+migration or new credential is needed for this BFF/Web release.
+
 The small CSS/React foundation and bounded HTTP proxy were copied from the recorded integration commit. Each repository owns its copy, dependency lock and tests; no build reads the sibling Web. Existing UI appearance is preserved for extraction. Complete redesign and real desktop/narrow-screen workflows remain the platform P3 gate.
 
 Independent tests use synthetic HTTP peers and do not prove paid provider or deployed-service operation. Current source/build/CI/live validation is recorded separately in the integration P2 ledger. Upgrade and rollback require the same HTTP/data/tool contract and bundle the matching BFF plus Web; there is no DB migration to undo.

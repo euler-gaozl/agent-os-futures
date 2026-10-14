@@ -31,6 +31,7 @@ import {
   Spinner,
 } from "./shared";
 import "./futures.css";
+import "./report.css";
 type Action = {
   id: string;
   revision: number;
@@ -43,6 +44,14 @@ function Futures() {
     [action, setAction] = useState<Action | null>(null),
     [commodity, setCommodity] = useState("甲醇"),
     [period, setPeriod] = useState("最近三个月，并补充可比历史数据"),
+    [asOf, setAsOf] = useState(() =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date()),
+    ),
     [question, setQuestion] = useState(""),
     [selected, setSelected] = useState(""),
     [result, setResult] = useState<any>(null),
@@ -131,7 +140,7 @@ function Futures() {
   };
   const run = async () => {
     const a = action || actions[0];
-    if (!a || !commodity.trim() || !question.trim()) return;
+    if (!a || !commodity.trim() || !question.trim() || !asOf) return;
     setBusy(true);
     setNotice("");
     try {
@@ -142,6 +151,7 @@ function Futures() {
           commodity,
           period,
           question,
+          as_of: asOf,
         },
         key.current,
       );
@@ -346,7 +356,7 @@ function Futures() {
                   </button>
                   <button onClick={() => setShowScope(!showScope)}>
                     <Clock3 size={13} />
-                    {period || "设置时间范围"}
+                    {period || "设置时间范围"} · 基准 {asOf}
                   </button>
                   {(action || actions[0]) && (
                     <button
@@ -401,6 +411,20 @@ function Futures() {
                       }}
                       placeholder="例如：2026 年 7–10 月"
                     />
+                  </label>
+                  <label>
+                    时间分类基准日
+                    <input
+                      type="date"
+                      value={asOf}
+                      onChange={(e) => {
+                        setAsOf(e.target.value);
+                        key.current = crypto.randomUUID();
+                      }}
+                    />
+                    <small>
+                      用于区分过去和未来，不代表当时已知数据的回测。
+                    </small>
                   </label>
                 </div>
               )}
@@ -526,13 +550,48 @@ function Futures() {
                       <span>研究记录</span>
                       <button
                         className="text-button"
-                        onClick={() => {
-                          const blob = new Blob([result.result], {
-                            type: "text/markdown;charset=utf-8",
+                        onClick={async () => {
+                          let structured = false;
+                          try {
+                            structured =
+                              JSON.parse(result.result).schema ===
+                              "futures-evidence-v1";
+                          } catch {
+                            /* Older answers retain Markdown. */
+                          }
+                          let content = result.result;
+                          if (structured) {
+                            try {
+                              const check = await api(
+                                "/tasks/" +
+                                  encodeURIComponent(result.id) +
+                                  "/report-check",
+                              );
+                              content = JSON.stringify(
+                                {
+                                  format: "futures-research-export-v1",
+                                  task_id: result.id,
+                                  raw_result: result.result,
+                                  check,
+                                },
+                                null,
+                                2,
+                              );
+                            } catch (e) {
+                              setNotice("导出未完成：" + (e as Error).message);
+                              return;
+                            }
+                          }
+                          const blob = new Blob([content], {
+                            type: structured
+                              ? "application/json;charset=utf-8"
+                              : "text/markdown;charset=utf-8",
                           });
                           const link = document.createElement("a");
                           link.href = URL.createObjectURL(blob);
-                          link.download = result.commodity + "-研究记录.md";
+                          link.download =
+                            result.commodity +
+                            (structured ? "-研究记录.json" : "-研究记录.md");
                           link.click();
                           URL.revokeObjectURL(link.href);
                         }}
@@ -540,7 +599,9 @@ function Futures() {
                         导出记录 <ArrowUpRight size={13} />
                       </button>
                     </div>
-                    <ResearchAnswer key={result.id} task={result.id}>{result.result}</ResearchAnswer>
+                    <ResearchAnswer key={result.id} task={result.id}>
+                      {result.result}
+                    </ResearchAnswer>
                   </article>
                 ) : result.status === "failed" ? (
                   <div className="research-failure">

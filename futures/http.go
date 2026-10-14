@@ -22,6 +22,7 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler { return servicehttp.New(s.HTTP, nil, s.Routes) }
 func (s *Server) Routes(mux *http.ServeMux) {
+	s.reportRoute(mux)
 	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
 		webproxy.Proxy(w, r, s.Client.RegistryURL+"/v1/published/futures", s.Client.Token)
 	})
@@ -31,6 +32,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 			Commodity string        `json:"commodity"`
 			Period    string        `json:"period"`
 			Question  string        `json:"question"`
+			AsOf      string        `json:"as_of"`
 		}
 		if e := servicehttp.Decode(w, r, &in); e != nil {
 			return e
@@ -41,7 +43,17 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		if r.Header.Get("Idempotency-Key") == "" {
 			return errors.New("idempotency key required")
 		}
-		body := contracts.JSON(map[string]any{"agent": in.Agent, "task": fmt.Sprintf("品种：%s\n资料时间范围：%s\n用户问题：%s", in.Commodity, in.Period, in.Question), "metadata": map[string]string{"commodity": in.Commodity, "period": in.Period}})
+		task := fmt.Sprintf("品种：%s\n资料时间范围：%s\n用户问题：%s", in.Commodity, in.Period, in.Question)
+		metadata := map[string]string{"commodity": in.Commodity, "period": in.Period}
+		if in.AsOf != "" {
+			if _, ok := validDate(in.AsOf); !ok {
+				return &servicehttp.StatusError{Status: 400, Message: "valid classification date required"}
+			}
+			metadata["as_of"] = in.AsOf
+			metadata["report_format"] = reportSchema
+			task += reportInstructions(in.AsOf)
+		}
+		body := contracts.JSON(map[string]any{"agent": in.Agent, "task": task, "metadata": metadata})
 		copy := r.Clone(r.Context())
 		copy.Body = io.NopCloser(bytes.NewReader(body))
 		copy.ContentLength = int64(len(body))
@@ -92,6 +104,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 func project(row map[string]any) {
 	if m, ok := row["metadata"].(map[string]any); ok {
 		row["commodity"] = m["commodity"]
+		row["as_of"] = m["as_of"]
+		row["report_format"] = m["report_format"]
 	}
 	delete(row, "metadata")
 }
