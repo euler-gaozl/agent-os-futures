@@ -1,115 +1,45 @@
-# Agent OS futures
+# Agent OS 期货研究工作台
 
-Owns the futures HTTP BFF and its separately built React/TypeScript Web. Service role is **futures**, default port **8098**. The integration repository selects this owner by exact commit. This repository never reads a database and has no migration command; release migration owner is none. Registry, ToolHub, Runtime, Knowledge, Storage and Sources retain their own data and authorization.
+独立的中国期货基本面研究 Web 与 Go BFF，默认端口 **8098**，服务身份为 `futures`。业务用户通过研究入口调用已发布的 Agent，不需要接触 Skill、MCP、提示词或模型配置。
 
-## Build
+## 研究与服务边界
 
-Go 1.27.2, Node 24.19.0 and pnpm 11.25.0. Fixed SDK rc.2 is vendored with canonical Go checksums; GOWORK=off and GOPROXY=off need no sibling clone or private module token. Run scripts/Build.ps1 for native BFF/healthcheck binaries. Run pnpm --dir web install --frozen-lockfile --ignore-scripts, pnpm --dir web test and pnpm --dir web run build. Docker builds only this service and Web; runtime image has no Node compiler or DB.
+AI 负责收集、校验、分类、留存和客观变化反馈；预测、方向与交易决定由用户负责。资料按具体日历区间组织，实绩、计划和第三方预测分开。当前尚未完成全品种资料覆盖或真实研究质量验收。
 
-Use deploy/service.example.json as the configuration contract, never commit real configuration. Start the BFF with --config pointing to a private file and FUTURES_WEB_DIR pointing to web/dist in a source build, or web in a Package-Web release (relative to its root). The healthcheck reads its private config from AGENTOS_CONFIG. Readiness verifies this process, not every downstream service; UI reports downstream availability separately.
+BFF 只通过 HTTP 访问发布的期货 Agent 与本应用任务，不直接访问数据库，没有迁移命令，不提供管理工具或凭证转发。用户鉴权使用 `BUSINESS_TOKEN`（兼容独立的 `ADMIN_TOKEN` 回退），服务调用使用另一枚 `SERVICE_TOKEN`。本地开发模式仍检查 Host、Origin 和写请求标记；密钥不进入前端。
 
-## Boundaries
+## 已有功能
 
-User authentication uses BUSINESS_TOKEN; outbound requests use a separate SERVICE_TOKEN. DEV_LOCAL=1 is for this exact loopback port only and still rejects foreign Origin/Host and unmarked writes. Static GET/HEAD assets are public; API/metrics/readyz remain protected. Startup rejects a missing/short effective user token or reuse of SERVICE_TOKEN, including DEV_LOCAL. Futures retains the prior ADMIN_TOKEN fallback when BUSINESS_TOKEN is absent, provided it is separate from SERVICE_TOKEN. No secrets are embedded in Web assets. Only published futures Agents and app-scoped Runtime tasks are exposed; no tool/credential/admin forwarding.
+- 发起研究、查看进度、结果和留存阅读记录。失败、取消或效果不明的任务即使没有报告，也能查看已经保存的资料；这不会触发重试或把任务改成完成。
+- `source://document/<id>` 只打开本任务范围内实际留存的阅读回执，不用当前知识库或其他任务替代历史来源。
+- 新任务固定分类日期 `as_of` 和 `futures-evidence-v1` 输出契约；分类日期不证明资料在历史当天已经公开。旧 Markdown 结果仍可阅读。
+- 只读报告检查核对结构、日期、存量/流量/累计量/产能/比率/未履约承诺分类、计划与实绩、有限的同口径比较，以及与留存原文的逐字引文匹配。
+- 导出保留原始模型结果、哈希、校验版本及来源标签。检查未通过不会改写历史结果或隐藏可定位的引文。
 
-Research records include a saved-reading panel and document citation buttons.
-`source://document/<id>` links open only an app-scoped retained document read;
-unknown IDs show an explicit missing citation instead of being resolved from
-another task or from the current Knowledge library. `/api/tasks/{id}/sources`
-and `/sources/record` proxy only Runtime's corresponding app evidence paths,
-using the service identity and no-store responses. Install a Runtime providing
-these additive endpoints first; an older Runtime leaves the report readable
-but shows source lookup unavailable. No schema/config/credential change is needed.
+`GET /api/tasks/{id}/report-check` 限制为 96 KiB JSON、40 条事实、30 组比较、8 个问题；来源读取最多 48 次请求、256 KiB 正文、15 秒及每文档前 8 条回执。超限或不支持的表达标为待复核。规则不能替代通用语义验证、来源真实性验证或独立交叉核验。
 
-The reader retains plain text, Unicode pagination, read ranges and metadata
-labels from the saved source. Source labels are not an independent truth check.
-Only successful document_read receipts are listed; other capture tools are not
-yet represented. A completed task still needs its facts/citations checked.
+## Agent 内的草稿检查工具
 
-Failed, cancelled and unknown-effect tasks can also open their retained reading
-records even when no report was generated. The evidence panel does not request
-a report check without an answer. Output/context and per-task budget errors have
-plain-language messages; displaying saved readings does not mark a failed task
-complete or retry its model/tool calls.
+`POST /mcp/research` 提供只读 `check_research_draft_v2`：输入有界 JSON 草稿和 `as_of`，不接收任务 ID 或 URL，不请求外部服务、不写数据库。完整 MCP 返回限制为 5,900 UTF-8 字节，低于 Runtime 的 6,000 字节归档阈值；保留路径、问题代码、总数与截断标记。相同代码的解释完全一致时才合并解释，不同解释分别保留。
 
-## Structured research records
+此接口仅接受本服务的 `SERVICE_TOKEN`。需在 Registry 单独保存凭证，在 Runtime/ToolHub 配置精确主机与端口白名单，完成发现、检查、启用，再绑定固定版本 Agent。启动服务不会自动完成这些管理操作。旧任务保持原绑定，最终网页检查仍使用该任务的真实阅读回执。
 
-New Web tasks pin an `as_of` classification date and the `futures-evidence-v1`
-output contract in Runtime-owned metadata. This date sorts statistical windows;
-it does not establish what was publicly known on that historical day. Older
-clients can omit it, and older Markdown answers remain readable.
+提交提示要求至多两次草稿检查，这是 Agent 指令而非新的硬性工具配额，实际执行受 Runtime 预算约束。真实反馈修订闭环目前仍受 Harness 上下文、预算和输出上限缺陷影响，见 [失败与后续修复记录](https://github.com/euler-gaozl/agent-os/blob/main/docs/research-feedback-20261014.md)。
 
-`GET /api/tasks/{id}/report-check` is a read-only, app-scoped projection. It
-checks strict bounded JSON, dates, stock/flow/cumulative-flow/capacity labels,
-reported/estimate/plan labels and exact quotations from completed document-read
-receipts. It never reads the current Knowledge library as a substitute. A quote
-match includes the immutable operation/version and Unicode position. The Web
-opens that exact receipt and highlights the quote, including across page bounds;
-failed field checks do not hide an otherwise matching original quotation.
+## 构建与部署
 
-The v1 expression matcher recognizes only direct clauses with adjacent explicit
-date, scope, metric, amount and unit. It does not infer omitted years, carry
-subjects between clauses, or treat distant estimate words as evidence. Other
-wording is preserved with a review flag; it is not evidence that the underlying
-fact is false. The optional arithmetic comparison needs an adjacent pair in the
-same quotation, introduced by an explicit same-basis statement, matching
-measure/unit/scope/nature and disjoint ordered periods. An explicit different-
-basis statement rejects the comparison. This is deliberately limited consistency
-checking, not a general semantic verifier, source authenticity/completeness check,
-stable-sample certification, or independent cross-check. Question/gap text remains
-Agent-generated investigation material even when structural checks pass.
+需要 Go 1.27.2、Node 24.19.0、pnpm 11.25.0；固定 SDK rc.2 和 `vendor` 支持独立构建。
 
-The v2 validator also separates ratios (including percentage-point differences)
-and outstanding contract commitments from capacity and physical inventory.
-It flags period-dependent metric labels, incompatible comparisons even before
-source checking, quantities in question/gap prose, and explicit plan labels
-without linked plan facts. These are finite rules, not general prose entailment;
-neutral questions and gap descriptions can still require human source review.
-Historical raw results are never rewritten by a validator upgrade.
+```powershell
+$env:GOWORK='off'; $env:GOPROXY='off'
+./scripts/Build.ps1
+pnpm --dir web install --frozen-lockfile --ignore-scripts
+pnpm --dir web test
+pnpm --dir web run build
+./scripts/Package-Web.ps1 -Destination <新的绝对路径>
+./scripts/Test-RelocatedPackage.ps1 -Package <发布包路径>
+```
 
-Each response includes the raw-result SHA-256 and validator version. Limits are
-96 KiB JSON, 40 facts, 30 comparisons, 8 questions; retained-source lookup uses at
-most 48 requests / 256 KiB text / 15 seconds and the first 8 receipts per document.
-Budget exhaustion or unsupported format is reported as pending review. The BFF
-does not persist a second report authority. Raw model output is retained by
-Runtime. JSON export bundles the unchanged raw output and the check, including
-source URL/publication/capture labels copied from that retained read; labels
-are not independently verified metadata. Legacy export stays Markdown. No schema/config
-migration or new credential is needed for reading reports. Enabling in-task MCP
-feedback requires the separate connector configuration described below.
+使用仓库外的 [服务配置](deploy/service.example.json)，以 `--config` 启动；`FUTURES_WEB_DIR` 指向源码构建的 `web/dist` 或发布包的 `web`。健康检查读取 `AGENTOS_CONFIG`。先安装提供应用证据接口的 Runtime；旧 Runtime 只能显示报告并明确提示来源接口不可用。
 
-## In-task research feedback
-
-`POST /mcp/research` offers the versioned, read-only
-`check_research_draft_v2` tool. It accepts only a bounded JSON draft string and
-`as_of`, never a run ID or URL, and makes no outbound requests or DB writes.
-It returns the draft hash, validator, repairable issues and source-review issues
-within 5,900 UTF-8 bytes for the complete MCP tool result, including escaped
-JSON text, with total/truncated counts. Each issue keeps its path and code;
-codes with identical explanations reuse their first explanation (`message` is
-then omitted). When one code has multiple distinct explanations, each is kept. The
-notice explains this convention. This stays below Runtime's 6,000-byte archive
-threshold, avoiding repeated artifact paging just to read duplicate guidance.
-It does not return the
-draft, create a report authority, match retained quotations, or claim that the
-caller-supplied date equals a task's pinned date. Runtime retains tool receipts.
-The final Web check still uses that task's actual immutable readings.
-
-This route has a separate service-auth chain: only this service's `SERVICE_TOKEN`
-is accepted, never BUSINESS_TOKEN, DEV_LOCAL or static-path exemptions. Register
-that credential in Registry under a dedicated name, allow the exact Futures
-host:port in Runtime/ToolHub MCP policy, discover/check/activate the connector,
-and bind its exact revision to a new Agent version. Never put the credential in
-prompts, Web or Git. Existing tasks retain their old bindings. MCP registration
-and these deployment/configuration steps are not performed by service startup.
-
-New submission instructions request at most two draft checks and correction of
-repairable issues without changing quotations or dropping key evidence. This is
-an Agent instruction, not a new hard per-tool quota; existing Runtime step/model
-budgets bound execution. No new decision loop or Runtime business rule is added.
-
-The small CSS/React foundation and bounded HTTP proxy were copied from the recorded integration commit. Each repository owns its copy, dependency lock and tests; no build reads the sibling Web. Existing UI appearance is preserved for extraction. Complete redesign and real desktop/narrow-screen workflows remain the platform P3 gate.
-
-Independent tests use synthetic HTTP peers and do not prove paid provider or deployed-service operation. Current source/build/CI/live validation is recorded separately in the integration P2 ledger. Upgrade and rollback require the same HTTP/data/tool contract and bundle the matching BFF plus Web; there is no DB migration to undo.
-
-Run scripts/Package-Web.ps1 -Destination <new-path> for a complete immutable native BFF/Web package, then scripts/Test-RelocatedPackage.ps1 -Package <path> to move it to a new sibling and exercise the actual executable with synthetic HTTP peers. The original location must be absent. No source, Node compiler or database is required by the package.
+BFF 和 Web 必须一起升级/回滚，保持相同 HTTP 契约。就绪检查不证明所有下游可用。Actions 日常关闭；独立模拟测试与实际安装、付费模型、研究质量分别验收。[历史实现细节](docs/history/service-notes-20261014.en.md) 保留原始记录。
