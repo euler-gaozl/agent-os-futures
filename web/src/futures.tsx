@@ -38,6 +38,17 @@ type Action = {
   name: string;
   description: string;
 };
+function failureMessage(error: string) {
+  if (error.includes("credential"))
+    return "研究模型尚未连接。请由工作区管理员完成连接后继续。";
+  if (error.includes("model output is incomplete or truncated"))
+    return "模型回复达到单次输出上限，研究记录尚未生成。已读取的资料仍可在下方回查。";
+  if (error.includes("model token budget exhausted"))
+    return "本任务剩余预算不足以预留下一次模型请求，任务已停止。已读取的资料仍可在下方回查。";
+  if (error.includes("context budget exceeded"))
+    return "任务上下文超出当前执行配置的上限，尚未完成压缩恢复。已读取的资料仍可在下方回查。";
+  return error || "执行过程中出现问题，研究进度已经保留。";
+}
 function Futures() {
   const [actions, setActions] = useState<Action[]>([]),
     [tasks, setTasks] = useState<any[]>([]),
@@ -607,12 +618,7 @@ function Futures() {
                   <div className="research-failure">
                     <FileText size={27} />
                     <h3>这次研究还未完成</h3>
-                    <p>
-                      {result.error?.includes("credential")
-                        ? "研究模型尚未连接。请由工作区管理员完成连接后继续。"
-                        : result.error ||
-                          "执行过程中出现问题，研究进度已经保留。"}
-                    </p>
+                    <p>{failureMessage(result.error || "")}</p>
                   </div>
                 ) : result.status === "waiting_unknown" ? (
                   <div className="research-failure">
@@ -633,6 +639,21 @@ function Futures() {
                     <p>已完成的进度会自动保存，你可以稍后回来查看。</p>
                   </div>
                 )}
+                {!result.result &&
+                  ["failed", "cancelled", "waiting_unknown"].includes(
+                    result.status,
+                  ) && (
+                    <article className="research-document">
+                      <div className="document-heading">
+                        <BookOpen size={19} />
+                        <span>已保留的资料</span>
+                      </div>
+                      <ResearchAnswer
+                        key={result.id + ":retained"}
+                        task={result.id}
+                      />
+                    </article>
+                  )}
                 {["running", "queued", "waiting_children"].includes(
                   result.status,
                 ) && (

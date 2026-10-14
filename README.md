@@ -26,6 +26,12 @@ labels from the saved source. Source labels are not an independent truth check.
 Only successful document_read receipts are listed; other capture tools are not
 yet represented. A completed task still needs its facts/citations checked.
 
+Failed, cancelled and unknown-effect tasks can also open their retained reading
+records even when no report was generated. The evidence panel does not request
+a report check without an answer. Output/context and per-task budget errors have
+plain-language messages; displaying saved readings does not mark a failed task
+complete or retry its model/tool calls.
+
 ## Structured research records
 
 New Web tasks pin an `as_of` classification date and the `futures-evidence-v1`
