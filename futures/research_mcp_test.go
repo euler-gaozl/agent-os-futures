@@ -231,3 +231,26 @@ func TestRepeatedDraftFindingsRemainInlineWithoutLosingPaths(t *testing.T) {
 		counts[key]--
 	}
 }
+
+func TestDraftFeedbackPreservesDifferentExplanationsWithTheSameCode(t *testing.T) {
+	r := exampleReport()
+	r.Questions[0].Question = "库存123万吨是否正确？"
+	r.Questions[0].Missing = []string{"需核对库存456万吨的依据"}
+	raw := encodeReport(t, r)
+	expected := checkReport(context.Background(), raw, r.AsOf, nil).Issues
+	out := reviewDraft(context.Background(), raw, r.AsOf)
+	var want, got []string
+	for _, item := range expected {
+		if item.Code == "prose_quantity" {
+			want = append(want, item.Message)
+		}
+	}
+	for _, item := range out.Revise {
+		if item.Code == "prose_quantity" {
+			got = append(got, item.Message)
+		}
+	}
+	if len(want) != 2 || want[0] == want[1] || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("different repairs were collapsed into one explanation: want=%v got=%v", want, got)
+	}
+}

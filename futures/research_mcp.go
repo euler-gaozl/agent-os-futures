@@ -33,7 +33,7 @@ type draftFeedback struct {
 	IssuesTruncated bool         `json:"issues_truncated"`
 }
 
-// Repeated issue codes share their first explanation. Keep each affected path,
+// Identical explanations of an issue code are shared. Keep each affected path,
 // but do not make the Agent page through an archive of duplicate explanations.
 type draftIssue struct {
 	Path    string `json:"path"`
@@ -49,12 +49,20 @@ func draftMCPResult(feedback draftFeedback) map[string]any {
 func reviewDraft(ctx context.Context, raw, asOf string) draftFeedback {
 	check := checkReport(ctx, raw, asOf, nil)
 	out := draftFeedback{Validator: check.Validator, DraftSHA256: check.ResultSHA256, Phase: "draft_only", Status: "source_review_required",
-		Notice: "仅检查草稿，未核对任务日期、回执、来源真实性或覆盖。相同 code 共用首项说明。查原文处理 source_review；不要改引文或删关键事实换取通过。最终仍需留存引用核对。",
+		Notice: "仅检查草稿，未核对任务日期、回执、来源真实性或覆盖。同 code 说明相同才省略重复 message；省略时复用首项说明。查原文处理 source_review；不要改引文或删关键事实换取通过。最终仍需留存引用核对。",
 		Revise: []draftIssue{}, SourceReview: []draftIssue{}, TotalIssues: len(check.Issues)}
+	explanations := map[string]string{}
+	mixed := map[string]bool{}
+	for _, issue := range check.Issues {
+		if previous, ok := explanations[issue.Code]; ok && previous != issue.Message {
+			mixed[issue.Code] = true
+		}
+		explanations[issue.Code] = issue.Message
+	}
 	seen := map[string]bool{}
 	for _, issue := range check.Issues {
 		item := draftIssue{Path: issue.Path, Code: issue.Code}
-		if !seen[issue.Code] {
+		if !seen[issue.Code] || mixed[issue.Code] {
 			item.Message = issue.Message
 			seen[issue.Code] = true
 		}

@@ -80,7 +80,8 @@ feedback requires the separate connector configuration described below.
 It returns the draft hash, validator, repairable issues and source-review issues
 within 5,900 UTF-8 bytes for the complete MCP tool result, including escaped
 JSON text, with total/truncated counts. Each issue keeps its path and code;
-repeated codes reuse the first explanation (`message` is then omitted). The
+codes with identical explanations reuse their first explanation (`message` is
+then omitted). When one code has multiple distinct explanations, each is kept. The
 notice explains this convention. This stays below Runtime's 6,000-byte archive
 threshold, avoiding repeated artifact paging just to read duplicate guidance.
 It does not return the
