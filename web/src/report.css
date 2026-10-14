@@ -50,6 +50,33 @@
   flex-wrap: wrap;
   margin: 8px 0;
 }
+.report-findings {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+.report-finding {
+  border-left: 3px solid #a8bbae;
+  padding: 10px 14px;
+  background: #f6f8f5;
+  overflow-wrap: anywhere;
+}
+.report-finding p {
+  margin: 6px 0;
+}
+.evidence-declaration {
+  background: #fff8e8;
+  border: 1px solid #e6d7b5;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.evidence-declaration p,
+.evidence-declaration ul {
+  margin: 6px 0;
+}
 .report-facts {
   display: grid;
   gap: 16px;

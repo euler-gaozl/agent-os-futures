@@ -33,22 +33,24 @@ type ResearchReport struct {
 	Comparisons []ReportComparison `json:"comparisons"`
 }
 type ReportQuestion struct {
-	ID            string   `json:"id"`
-	Question      string   `json:"question"`
-	FactIDs       []string `json:"fact_ids"`
-	ComparisonIDs []string `json:"comparison_ids"`
-	Missing       []string `json:"missing"`
+	ID            string          `json:"id"`
+	Question      string          `json:"question"`
+	FactIDs       []string        `json:"fact_ids"`
+	ComparisonIDs []string        `json:"comparison_ids"`
+	Missing       []string        `json:"missing"`
+	Findings      []ReportFinding `json:"findings,omitempty"`
 }
 type ReportFact struct {
-	ID      string       `json:"id"`
-	Metric  string       `json:"metric"`
-	Value   string       `json:"value"`
-	Unit    string       `json:"unit"`
-	Scope   string       `json:"scope"`
-	Measure string       `json:"measure"`
-	Nature  string       `json:"nature"`
-	Period  ReportPeriod `json:"period"`
-	Source  ReportSource `json:"source"`
+	ID       string          `json:"id"`
+	Metric   string          `json:"metric"`
+	Value    string          `json:"value"`
+	Unit     string          `json:"unit"`
+	Scope    string          `json:"scope"`
+	Measure  string          `json:"measure"`
+	Nature   string          `json:"nature"`
+	Period   ReportPeriod    `json:"period"`
+	Source   ReportSource    `json:"source"`
+	Evidence *ReportEvidence `json:"evidence,omitempty"`
 }
 type ReportPeriod struct {
 	Start string `json:"start"`
@@ -285,6 +287,12 @@ func sourcePeriod(value string) (ReportPeriod, bool) {
 	return ReportPeriod{}, false
 }
 func dateGroup(f ReportFact, asOf string) string {
+	if f.Period.Start == "" || f.Period.End == "" || (f.Evidence != nil && f.Evidence.PeriodBasis == "unknown") {
+		return "统计期未确认 · 待核报数"
+	}
+	if f.Evidence != nil && f.Evidence.PeriodBasis == "inferred" {
+		return "日期含推断 · 暂不归类"
+	}
 	suffix := map[string]string{"reported": "来源报数", "estimate": "第三方估计", "plan": "披露计划"}[f.Nature]
 	if f.Period.End < asOf {
 		return "已结束区间 · " + suffix
@@ -331,7 +339,7 @@ func comparableExpressions(current, baseline ReportFact) bool {
 }
 func checkReport(ctx context.Context, raw, asOf string, read quoteReader) ReportCheck {
 	digest := sha256.Sum256([]byte(raw))
-	out := ReportCheck{Validator: "futures-report-check-v2", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
+	out := ReportCheck{Validator: "futures-report-check-v3", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
 	add := func(path, code, msg string) { out.Issues = append(out.Issues, ReportIssue{path, code, msg}) }
 	report, e := parseReport(raw)
 	if e != nil {
@@ -376,7 +384,9 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		}
 		_, startOK := validDate(f.Period.Start)
 		_, endOK := validDate(f.Period.End)
-		if !startOK || !endOK || f.Period.Start > f.Period.End {
+		unknownPeriod := f.Evidence != nil && f.Evidence.PeriodBasis == "unknown" && f.Period.Start == "" && f.Period.End == ""
+		checkEvidence(f, path, add)
+		if !unknownPeriod && (!startOK || !endOK || f.Period.Start > f.Period.End) {
 			add(path, "period", "统计日历区间无效。")
 		}
 		if f.Measure == "stock" && f.Period.Start != f.Period.End {
@@ -388,7 +398,7 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		if f.Nature == "reported" && f.Period.End > asOf {
 			add(path, "future_actual", "基准日之后尚未结束的区间不能作为该日期前已发生实绩。")
 		}
-		if !reportID.MatchString(f.Source.DocumentID) || !bounded(f.Source.Quote, 2400) || !bounded(f.Source.PeriodText, 100) {
+		if !reportID.MatchString(f.Source.DocumentID) || !bounded(f.Source.Quote, 2400) || (!unknownPeriod && !bounded(f.Source.PeriodText, 100)) || utf8.RuneCountInString(f.Source.PeriodText) > 100 {
 			add(path, "source", "必须提供本任务读过的文档与有界原文。")
 		} else {
 			q := compact(f.Source.Quote)
@@ -397,7 +407,7 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 				add(path, "anchor", "尚未匹配同一明确句式中的日期、样本、指标、数值和单位；需回查原文，不凭整段共现确认关系。")
 			}
 			p, ok := sourcePeriod(f.Source.PeriodText)
-			if !ok || p != f.Period || !strings.Contains(q, compact(f.Source.PeriodText)) {
+			if !unknownPeriod && (!ok || p != f.Period || !strings.Contains(q, compact(f.Source.PeriodText))) {
 				add(path, "period_anchor", "现有日期规则尚未确认所填区间与引用一致；需回查年份和统计窗口。")
 			}
 			if f.Nature == "reported" && uncertainWords.MatchString(expression) {
@@ -513,6 +523,7 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		if len(q.FactIDs) == 0 && len(q.Missing) == 0 {
 			add(path, "empty", "问题必须列出对应证据或具体待查资料。")
 		}
+		checkFindings(q, path, facts, comparisons, add)
 	}
 	if read == nil {
 		add("report", "retained_unchecked", "此为草稿检查，未读取任务回执。原文存在性、真实性及报告完整性尚未验证。")
@@ -662,5 +673,8 @@ func reportInstructions(asOf string) string {
 	return fmt.Sprintf(`
 时间分类基准日固定为 %s，用于过去/未来分类，不代表历史时点已知信息回测。最后回答只输出一个 JSON 对象（不加代码围栏）：
 {"schema":"futures-evidence-v1","as_of":"%s","questions":[{"id":"q1","question":"待核核心问题","fact_ids":["f1"],"comparison_ids":[],"missing":["仍需调查的具体资料"]}],"facts":[{"id":"f1","metric":"原文指标名称","value":"十进制数值","unit":"原文单位","scope":"原文样本范围","measure":"stock 或 flow 或 cumulative_flow 或 capacity 或 ratio 或 commitment","nature":"reported 或 estimate 或 plan","period":{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"},"source":{"document_id":"实际document_read的ID","quote":"逐字复制已读取原文，不添加或改写任何字符","period_text":"quote内明确带年份的原文日期"}}],"comparisons":[{"id":"c1","current":"后一期fact编号","baseline":"前一期fact编号"}]}
-quote 必须包含支持该报数的连续原文，最多2400字符，不能跨日期或样本借用其他数字。period_text使用明确带年份的原文日期；含糊日期不要猜测。最多40事实/8问题/30比较。自动检查只支持有限明确句式，未识别会标待核：不能为凑格式改写原文或删掉关键事实。估计、计划必须单列其nature，过去估计也不是实绩；库存是时点，压榨量是区间流量，累计流量另标cumulative_flow。开机率等比率使用ratio；时点未执行合同使用commitment，不能当实物库存。metric/scope使用稳定指标/样本名，日期只放period。百分比的前后差额是百分点。比较只有同一来源明确声明同口径且保留完整支持原文时才可能自动计算；没有声明则列待核口径，不能补写“同口径”。问题与缺口文字保持中性，不夹带报数或已证实结论：所有报数留在facts并关联fact_ids，不能把预估改称计划，不能为消除提示删掉关键数据。不要输出自由总结、方向预测、因果结论或全库缺失断言；未证实的解释保持问题与待查资料。保留问题与证据关系，先查关键资料，缺口按已授权公开来源继续调查，不能为过格式校验而删除问题。若绑定了check_research_draft_v2工具，最终输出前提交完整草稿和本任务as_of，依据revise修订并回查source_review；最多两轮草稿检查。无法确认的项保留待核，不改原文、不删核心问题、不声称检查工具证明事实真实。`, asOf, asOf)
+每项 fact 还应包含 evidence：{"content_kind":"publisher_text 或 ai_summary 或 unverified","period_basis":"explicit 或 inferred 或 unknown","period_note":"日期依据及仍未确认之处","limitations":[]}。publisher_text 只说明来自发布正文，不表示真实或独立调查；转载、正文受限、样本变化、版本冲突等逐条写入 limitations。AI 生成摘要的数字只能标 ai_summary 并保留为调查线索，不得当原发布者已确认报数。无法取得正文仍保留这条线索及缺口，不编造支持引文。
+没有完整统计期时允许 period.start 和 period.end 同时为 ""，period_basis=unknown，并在 period_note 写清缺什么依据；source.period_text 保留实际读到的日期片段，没有则留空。年份等由标题或发布日期推断时标 inferred 并说明依据，不能悄悄当 explicit。发布日期不能代替统计日，周度库存不能把周报发布日当库存时点。此类待核提示不要求强行补日期。
+每个 question 可包含 findings 数组，每项为 {"kind":"observation 或 conflict 或 limitation","text":"对该核心问题的客观回答及证据边界","fact_ids":["本问题关联事实ID"],"comparison_ids":[]}。据已取得资料直接回答问题，不只重复问题或罗列数据；可指出来源自报环比、版本冲突、不能勾稽的关系。文字须由引用支持，不能给交易预测或把推测写成事实；同口径比较条件不足时只并列报数和限制，不擅自计算差额。所有数值仍须在 facts 保留并关联，解读不是自动验证的结论。missing 只列尚未取得的具体依据，不得把已经关联的资料再说成未取得；缺样本稳定说明与缺数据本身必须区分。
+quote 必须包含支持该报数的连续原文，最多2400字符，不能跨日期或样本借用其他数字。period_text逐字保留原文统计日期；没有明确年份或窗口时按 evidence 标注推断或未知，不为结构检查补造。最多40事实/8问题/30比较。自动检查只支持有限明确句式，未识别会标待核：不能为凑格式改写原文或删掉关键事实。估计、计划必须单列其nature，过去估计也不是实绩；库存是时点，压榨量是区间流量，累计流量另标cumulative_flow。开机率等比率使用ratio；时点未执行合同使用commitment，不能当实物库存。metric/scope使用稳定指标/样本名，日期只放period。百分比的前后差额是百分点。比较只有同一来源明确声明同口径且保留完整支持原文时才可能自动计算；没有声明则列待核口径，不能补写“同口径”。问题与缺口文字保持中性，不夹带报数或已证实结论：所有报数留在facts并关联fact_ids，不能把预估改称计划，不能为消除提示删掉关键数据。不要输出自由总结、方向预测、因果结论或全库缺失断言；未证实的解释保持问题与待查资料。保留问题与证据关系，先查关键资料，缺口按已授权公开来源继续调查，不能为过格式校验而删除问题。若绑定了check_research_draft_v2工具，最终输出前提交完整草稿和本任务as_of，依据revise修订并回查source_review；最多两轮草稿检查。最终输出须逐字复制最后一次送检的 draft，不在送检后另改报数、日期、引用或解读；仍有待核项就明确保留，不伪称已核实。无法确认的项保留待核，不改原文、不删核心问题、不声称检查工具证明事实真实。`, asOf, asOf)
 }

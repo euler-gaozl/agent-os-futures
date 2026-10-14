@@ -19,6 +19,12 @@ type Fact = {
   nature: string;
   period: { start: string; end: string };
   source: { document_id: string; quote: string; period_text: string };
+  evidence?: {
+    content_kind: string;
+    period_basis: string;
+    period_note: string;
+    limitations: string[];
+  };
 };
 export type ReportCheck = {
   status: string;
@@ -35,6 +41,12 @@ export type ReportCheck = {
       fact_ids: string[];
       comparison_ids: string[];
       missing: string[];
+      findings?: {
+        kind: string;
+        text: string;
+        fact_ids: string[];
+        comparison_ids: string[];
+      }[];
     }[];
     facts: Fact[];
     comparisons: { id: string; current: string; baseline: string }[];
@@ -65,6 +77,16 @@ const nature: Record<string, string> = {
   reported: "来源报数",
   estimate: "第三方估计",
   plan: "披露计划",
+};
+const evidenceKind: Record<string, string> = {
+  publisher_text: "发布正文（来源仍需核对）",
+  ai_summary: "AI 摘要线索 · 未确认",
+  unverified: "来源性质未确认",
+};
+const periodBasis: Record<string, string> = {
+  explicit: "原文明确标注（待核对）",
+  inferred: "日期含推断 · 未确认",
+  unknown: "统计期未确认",
 };
 const measure: Record<string, string> = {
   stock: "时点库存",
@@ -117,11 +139,37 @@ export function CheckedReport({
       {report ? (
         <>
           <section className="report-questions">
-            <h3>待核研究问题</h3>
-            <p>由 Agent 整理的调查线索，问题中的假设不作为结论。</p>
+            <h3>核心问题与资料解读</h3>
+            <p>解读由 Agent 根据关联资料整理；来源限制和待核项仍适用。</p>
             {report.questions.map((q) => (
               <article key={q.id}>
                 <h4>{q.question}</h4>
+                {!!q.findings?.length && (
+                  <div className="report-findings">
+                    {q.findings.map((finding, i) => (
+                      <div className="report-finding" key={i}>
+                        <b>
+                          {finding.kind === "conflict"
+                            ? "来源冲突"
+                            : finding.kind === "limitation"
+                              ? "证据边界"
+                              : finding.kind === "observation"
+                                ? "资料观察"
+                                : "类型待核"}{" "}
+                          · 待核
+                        </b>
+                        <p>{finding.text}</p>
+                        <div className="fact-links">
+                          {finding.fact_ids?.map((id) => (
+                            <a key={id} href={"#report-fact-" + id}>
+                              依据 {id}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="fact-links">
                   {q.fact_ids.map((id) => (
                     <a key={id} href={"#report-fact-" + id}>
@@ -145,7 +193,7 @@ export function CheckedReport({
               </article>
             ))}
           </section>
-          <h3>来源报数与口径</h3>
+          <h3>报数、线索与来源限制</h3>
           {!report.facts.length && (
             <p>尚未提供可逐项回查的报数，请继续补充关键资料。</p>
           )}
@@ -163,6 +211,27 @@ export function CheckedReport({
                     state?.consistent ? "fact-card" : "fact-card needs-review"
                   }
                 >
+                  {f.evidence && (
+                    <div className="evidence-declaration">
+                      <b>
+                        资料性质（Agent 标注）：
+                        {evidenceKind[f.evidence.content_kind] || "性质待核"}
+                      </b>
+                      <p>
+                        {periodBasis[f.evidence.period_basis] || "日期依据待核"}
+                        {f.evidence.period_note
+                          ? "：" + f.evidence.period_note
+                          : ""}
+                      </p>
+                      {!!f.evidence.limitations?.length && (
+                        <ul>
+                          {f.evidence.limitations.map((note, i) => (
+                            <li key={i}>{note}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                   <div className="fact-kind">
                     <span>
                       Agent 标注：{nature[f.nature] || "属性待核"} ·{" "}
@@ -185,9 +254,13 @@ export function CheckedReport({
                     <dd>{f.scope}</dd>
                     <dt>统计区间</dt>
                     <dd>
-                      {f.period.start === f.period.end
-                        ? f.period.start
-                        : f.period.start + " — " + f.period.end}
+                      {!f.period.start ||
+                      !f.period.end ||
+                      f.evidence?.period_basis === "unknown"
+                        ? "统计日期尚未确认"
+                        : f.period.start === f.period.end
+                          ? f.period.start
+                          : f.period.start + " — " + f.period.end}
                     </dd>
                     <dt>时间分组</dt>
                     <dd>{state?.group || "待核"}</dd>

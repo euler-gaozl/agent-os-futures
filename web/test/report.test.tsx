@@ -109,3 +109,62 @@ test("old answer remains readable but explicitly unverified", () => {
   assert.match(html, /运行完成不等于研究核验完成/);
   assert.doesNotMatch(html, /结构与留存引用检查一致/);
 });
+
+test("AI candidates and unknown periods remain readable without a fabricated calendar date", () => {
+  const check = report();
+  check.status = "needs_review";
+  check.facts[0].consistent = false;
+  check.facts[0].group = "统计期未确认 · 待核报数";
+  const fact = check.report!.facts[0];
+  fact.period = { start: "", end: "" };
+  fact.evidence = {
+    content_kind: "ai_summary",
+    period_basis: "unknown",
+    period_note: "只读到本周，统计窗口未披露",
+    limitations: [
+      '正文受限，<img src="https://tracking.invalid/x">不能替代原文',
+    ],
+  };
+  check.report!.questions[0].findings = [
+    {
+      kind: "limitation",
+      text: "目前仅取得摘要线索，不能据此确认实绩。",
+      fact_ids: ["f"],
+      comparison_ids: [],
+    },
+  ];
+  const html = renderToStaticMarkup(
+    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+  );
+  assert.match(html, /AI 摘要线索 · 未确认/);
+  assert.match(html, /统计期未确认/);
+  assert.match(html, /统计日期尚未确认/);
+  assert.match(html, /目前仅取得摘要线索/);
+  assert.match(html, /证据边界/);
+  assert.match(html, /href="#report-fact-f"/);
+  assert.match(html, /回查任务当时保存的资料/);
+  assert.doesNotMatch(html, /2026-09-01|<img|结构与留存引用检查一致/);
+});
+
+test("invalid optional arrays cannot crash the report projection", () => {
+  const check = report();
+  check.report!.facts[0].evidence = {
+    content_kind: "unverified",
+    period_basis: "unknown",
+    period_note: "未确认",
+    limitations: null as never,
+  };
+  check.report!.questions[0].findings = [
+    {
+      kind: "unknown",
+      text: "待核",
+      fact_ids: null as never,
+      comparison_ids: [],
+    },
+  ];
+  const html = renderToStaticMarkup(
+    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+  );
+  assert.match(html, /来源性质未确认/);
+  assert.match(html, /类型待核/);
+});
