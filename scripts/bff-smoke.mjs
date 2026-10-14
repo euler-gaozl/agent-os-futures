@@ -14,6 +14,9 @@ const fixture=fs.mkdtempSync(path.join(path.dirname(root),'bff-fixture-'));
 const serviceToken=randomBytes(32).toString('hex'), userToken=randomBytes(32).toString('hex');
 const wrongAdmin=randomBytes(32).toString('hex');
 const requests=[];let failToolhub=false,instanceSeen=false;
+const longQuestion='供给库存资料。'.repeat(250000)+'末尾核对标记';
+const longResult='库存原文。'.repeat(650000)+'最后一段';
+let largeTaskTransport=false;
 const json=(res,status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body))};
 const upstream=http.createServer(async(req,res)=>{
  try{
@@ -31,6 +34,7 @@ const upstream=http.createServer(async(req,res)=>{
   if(req.url==='/v1/apps/futures/runs'&&req.method==='POST')return json(res,202,{id:'fixture-run',state:'queued'});
   if(req.url==='/v1/apps/futures/runs'&&req.method==='GET')return json(res,200,[{id:'fixture-run',state:'completed',metadata:{commodity:'甲醇',internal:'hidden'}}]);
   if(req.url==='/v1/apps/futures/runs/fixture-run')return json(res,200,{id:'fixture-run',state:'completed',metadata:{commodity:'甲醇',internal:'hidden'},result:'Synthetic only'});
+  if(req.url==='/v1/apps/futures/runs/large-result')return json(res,200,{id:'large-result',status:'completed',metadata:{commodity:'豆粕',as_of:'2026-10-09',report_format:'futures-evidence-v1'},result:longResult});
   if(req.url==='/v1/apps/futures/runs/fixture-run/cancel')return json(res,200,{state:'cancelled'});
   if(req.url==='/artifacts/fixture?offset=1'){res.writeHead(206,{'Content-Type':'text/plain','Content-Disposition':'attachment; filename="fixture.txt"','X-Artifact-Media-Type':'text/plain'});return res.end('retained fixture');}
   return json(res,404,{error:'unexpected fixture route'});
@@ -88,6 +92,10 @@ try{
   const sent=requests.find(r=>r.method==='POST'&&r.url==='/v1/apps/futures/runs');assert.equal(sent.key,'fixture-stable');assert.deepEqual(sent.body.agent,task.agent);assert.equal(sent.body.metadata.commodity,'甲醇');assert.ok(sent.body.task.includes(task.question));
   const rows=await(await request('/api/tasks')).json();assert.equal(rows[0].commodity,'甲醇');assert.ok(!('metadata'in rows[0]));
   const detail=await(await request('/api/tasks/fixture-run')).json();assert.equal(detail.commodity,'甲醇');assert.ok(!('metadata'in detail));
+  const largeSubmit=await request('/api/tasks',userToken,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':'fixture-large'},body:JSON.stringify({...task,question:longQuestion})});assert.equal(largeSubmit.status,202);
+  const largeSent=requests.find(r=>r.key==='fixture-large');assert.ok(largeSent.body.task.endsWith(longQuestion));assert.ok(Buffer.byteLength(longQuestion)>4*1024*1024);
+  const largeDetail=await request('/api/tasks/large-result');assert.equal(largeDetail.status,200);assert.equal((await largeDetail.json()).result,longResult);assert.ok(Buffer.byteLength(longResult)>9*1024*1024);
+  const largeCheck=await request('/api/tasks/large-result/report-check');assert.equal(largeCheck.status,200);const checked=await largeCheck.json();assert.equal(checked.result_sha256,createHash('sha256').update(longResult).digest('hex'));assert.ok(checked.issues.length>0);largeTaskTransport=true;
   assert.equal((await request('/api/tasks/fixture-run/cancel',userToken,{method:'POST',body:'{}',headers:{'Idempotency-Key':'fixture-cancel'}})).status,200);
   const readiness=await(await request('/api/readiness')).json();assert.equal(readiness.model_configured,false);assert.equal(readiness.knowledge_available,true);
   count=requests.length;
@@ -105,7 +113,7 @@ try{
   if(!stopped)cleanupError=Error('fixture process did not exit');
  }finally{
   fs.closeSync(log);upstream.closeAllConnections();await new Promise(resolve=>upstream.close(resolve));
-  fs.writeFileSync(path.join(fixture,'result.json'),JSON.stringify({passed:success&&!cleanupError,role,commit:manifest.commit,scope:'actual relocated BFF and Web; synthetic authenticated HTTP peers; no database or model',requests:requests.length,heartbeat:instanceSeen,process_stopped:Boolean(stopped)},null,2));
+  fs.writeFileSync(path.join(fixture,'result.json'),JSON.stringify({passed:success&&!cleanupError,role,commit:manifest.commit,scope:'actual relocated BFF and Web; synthetic authenticated HTTP peers; no database or model',requests:requests.length,heartbeat:instanceSeen,process_stopped:Boolean(stopped),large_task_transport:largeTaskTransport,input_bytes:Buffer.byteLength(longQuestion),output_bytes:Buffer.byteLength(longResult)},null,2));
  }
  if(cleanupError)throw cleanupError;
 }

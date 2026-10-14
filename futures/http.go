@@ -44,11 +44,11 @@ func (s *Server) Routes(mux *http.ServeMux) {
 			Question  string        `json:"question"`
 			AsOf      string        `json:"as_of"`
 		}
-		if e := servicehttp.Decode(w, r, &in); e != nil {
+		if e := decodeTaskRequest(w, r, &in); e != nil {
 			return e
 		}
-		if strings.TrimSpace(in.Commodity) == "" || len(in.Commodity) > 100 || len(in.Period) > 300 || len(in.Question) > 20000 {
-			return errors.New("commodity and bounded research question required")
+		if strings.TrimSpace(in.Commodity) == "" || len(in.Commodity) > 100 || len(in.Period) > 300 {
+			return errors.New("commodity and valid research period required")
 		}
 		if r.Header.Get("Idempotency-Key") == "" {
 			return errors.New("idempotency key required")
@@ -63,11 +63,14 @@ func (s *Server) Routes(mux *http.ServeMux) {
 			metadata["report_format"] = reportSchema
 			task += reportInstructions(in.AsOf)
 		}
+		if len(task) > taskTextBytes {
+			return &servicehttp.StatusError{Status: 413, Message: "research task exceeds execution transport capacity"}
+		}
 		body := contracts.JSON(map[string]any{"agent": in.Agent, "task": task, "metadata": metadata})
 		copy := r.Clone(r.Context())
 		copy.Body = io.NopCloser(bytes.NewReader(body))
 		copy.ContentLength = int64(len(body))
-		webproxy.Proxy(w, copy, s.Client.RuntimeURL+"/v1/apps/futures/runs", s.Client.Token)
+		webproxy.ProxyLimits(w, copy, s.Client.RuntimeURL+"/v1/apps/futures/runs", s.Client.Token, taskRequestBytes, 4<<20)
 		return nil
 	}))
 	mux.HandleFunc("GET /api/tasks", servicehttp.Wrap(func(w http.ResponseWriter, r *http.Request) error {
@@ -83,7 +86,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("GET /api/tasks/{id}", servicehttp.Wrap(func(w http.ResponseWriter, r *http.Request) error {
 		var row map[string]any
-		if e := s.Client.Request(r.Context(), "GET", s.Client.RuntimeURL+"/v1/apps/futures/runs/"+url.PathEscape(r.PathValue("id")), nil, &row); e != nil {
+		if e := s.readTask(r.Context(), r.PathValue("id"), &row); e != nil {
 			return e
 		}
 		project(row)

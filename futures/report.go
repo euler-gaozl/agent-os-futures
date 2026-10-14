@@ -640,7 +640,7 @@ func (s *Server) reportRoute(mux *http.ServeMux) {
 			Result   string            `json:"result"`
 			Metadata map[string]string `json:"metadata"`
 		}
-		if e := s.Client.Request(ctx, "GET", base, nil, &task); e != nil {
+		if e := s.readTask(ctx, r.PathValue("id"), &task); e != nil {
 			return e
 		}
 		if task.ID != r.PathValue("id") {
