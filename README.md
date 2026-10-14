@@ -30,7 +30,9 @@ BFF 只通过 HTTP 访问发布的期货 Agent 与本应用任务，不直接访
 
 提交提示要求至多两次草稿检查，并逐字输出最后一次送检的草稿；这是 Agent 指令，尚不是执行器强制的最终稿一致性保证。未知日期、来源受限及资料解读进入 `source_review`，不能要求模型编造日期换取通过。草稿工具没有读取任务回执，也不证明来源真实。真实任务的报告质量仍未通过，见 [读取修复与研究记录](https://github.com/euler-gaozl/agent-os/blob/main/docs/research-read-acceptance-20261014.md)。
 
-`futures-evidence-v1` 增加可选 `facts[].evidence` 和 `questions[].findings`，检查器标识为 `futures-report-check-v3`；新读者保留旧报告兼容。旧版 BFF 会将包含这些字段的新报告显示为未结构化原文，因此回退后仍能读到完整结果，但不能声称新字段 UI 也兼容。此次没有修改 Runtime 的任务、原结果或数据库格式。
+`futures-evidence-v1` 增加可选 `facts[].evidence` 和 `questions[].findings`，当前检查器标识为 `futures-report-check-v4`；新读者保留旧报告兼容。旧版 BFF 会将包含这些字段的新报告显示为未结构化原文，因此回退后仍能读到完整结果，但不能声称新字段 UI 也兼容。此次没有修改 Runtime 的任务、原结果或数据库格式。
+
+v4 修正推断日期的时间检查：`period_basis=inferred` 保持来源待核，不再因推断年份晚于分类基准日而触发 `future_actual` 结构修订。引用、日期依据待核和禁止比较仍保留；明确日期的未来实绩和无效日历区间仍需修订。此为 Mac 合成夹具验证，未复现原 Windows 私有任务，也不代表真实研究质量已验收。历史送检反馈保留原检查器标识与内容。
 
 ## 构建与部署
 

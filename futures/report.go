@@ -339,7 +339,7 @@ func comparableExpressions(current, baseline ReportFact) bool {
 }
 func checkReport(ctx context.Context, raw, asOf string, read quoteReader) ReportCheck {
 	digest := sha256.Sum256([]byte(raw))
-	out := ReportCheck{Validator: "futures-report-check-v3", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
+	out := ReportCheck{Validator: "futures-report-check-v4", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
 	add := func(path, code, msg string) { out.Issues = append(out.Issues, ReportIssue{path, code, msg}) }
 	report, e := parseReport(raw)
 	if e != nil {
@@ -395,7 +395,10 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		if f.Measure == "commitment" && f.Period.Start != f.Period.End {
 			add(path, "commitment_period", "未执行合同余额需对应明确时点；区间签约量属于另一指标。")
 		}
-		if f.Nature == "reported" && f.Period.End > asOf {
+		// Inferred dates remain source-review candidates, not an established
+		// calendar basis for declaring an actual observation to be in the future.
+		inferredPeriod := f.Evidence != nil && f.Evidence.PeriodBasis == "inferred"
+		if f.Nature == "reported" && !inferredPeriod && f.Period.End > asOf {
 			add(path, "future_actual", "基准日之后尚未结束的区间不能作为该日期前已发生实绩。")
 		}
 		if !reportID.MatchString(f.Source.DocumentID) || !bounded(f.Source.Quote, 2400) || (!unknownPeriod && !bounded(f.Source.PeriodText, 100)) || utf8.RuneCountInString(f.Source.PeriodText) > 100 {
