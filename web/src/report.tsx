@@ -101,8 +101,8 @@ export function CheckedReport({
         )}
       </header>
       {!!check.issues.length && (
-        <details className="report-issues" open>
-          <summary>{check.issues.length} 项检查未通过</summary>
+        <details className="report-issues">
+          <summary>{check.issues.length} 项待核记录 · 展开查看</summary>
           <ul>
             {check.issues.map((i, n) => (
               <li key={n}>
@@ -163,7 +163,7 @@ export function CheckedReport({
                 >
                   <div className="fact-kind">
                     <span>
-                      {nature[f.nature] || "属性待核"} ·{" "}
+                      Agent 标注：{nature[f.nature] || "属性待核"} ·{" "}
                       {measure[f.measure] || "统计类型待核"}
                     </span>
                     <span>

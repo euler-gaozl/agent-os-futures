@@ -10,7 +10,7 @@ export const labels: Record<string, string> = {
   running: "执行中",
   waiting_children: "等待子任务",
   waiting_unknown: "待核对",
-  completed: "已完成",
+  completed: "记录已生成",
   failed: "执行失败",
   cancelled: "已取消",
   ready: "可检索",

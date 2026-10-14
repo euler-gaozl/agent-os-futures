@@ -377,16 +377,16 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 			}
 			p, ok := sourcePeriod(f.Source.PeriodText)
 			if !ok || p != f.Period || !strings.Contains(q, compact(f.Source.PeriodText)) {
-				add(path, "period_anchor", "原文日期不能明确支持所填区间；不猜测缺失的年份或统计窗口。")
+				add(path, "period_anchor", "现有日期规则尚未确认所填区间与引用一致；需回查年份和统计窗口。")
 			}
 			if f.Nature == "reported" && uncertainWords.MatchString(expression) {
 				add(path, "estimated_as_actual", "引用包含估计或计划表述，不能直接标为实绩。")
 			}
 			if f.Nature == "estimate" && (!estimateWords.MatchString(expression) || planWords.MatchString(expression)) {
-				add(path, "estimate_anchor", "引用缺少明确估计或预测表述。")
+				add(path, "estimate_anchor", "现有规则尚未确认估计表述与这项报数的对应关系；需结合原文核对。")
 			}
 			if f.Nature == "plan" && (!planWords.MatchString(expression) || estimateWords.MatchString(expression)) {
-				add(path, "plan_anchor", "引用缺少明确计划表述。")
+				add(path, "plan_anchor", "现有规则尚未确认计划表述与这项报数的对应关系；需结合原文核对。")
 			}
 			// A wrong interpretation should not hide its genuine original quote.
 			// Matching a receipt remains independent of checking the fact fields.
