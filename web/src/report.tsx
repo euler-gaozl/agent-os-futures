@@ -100,10 +100,12 @@ export function CheckedReport({
   check,
   raw,
   onSource,
+  rawLabel = "原始模型输出（完整保留）",
 }: {
   check: ReportCheck;
   raw: string;
   onSource: OpenSource;
+  rawLabel?: string;
 }) {
   const report = check.report;
   return (
@@ -353,7 +355,7 @@ export function CheckedReport({
             </section>
           )}
           <details className="report-original">
-            <summary>原始模型输出（完整保留）</summary>
+            <summary>{rawLabel}</summary>
             <pre>{raw}</pre>
           </details>
         </>
