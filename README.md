@@ -53,6 +53,14 @@ checking, not a general semantic verifier, source authenticity/completeness chec
 stable-sample certification, or independent cross-check. Question/gap text remains
 Agent-generated investigation material even when structural checks pass.
 
+The v2 validator also separates ratios (including percentage-point differences)
+and outstanding contract commitments from capacity and physical inventory.
+It flags period-dependent metric labels, incompatible comparisons even before
+source checking, quantities in question/gap prose, and explicit plan labels
+without linked plan facts. These are finite rules, not general prose entailment;
+neutral questions and gap descriptions can still require human source review.
+Historical raw results are never rewritten by a validator upgrade.
+
 Each response includes the raw-result SHA-256 and validator version. Limits are
 96 KiB JSON, 40 facts, 30 comparisons, 8 questions; retained-source lookup uses at
 most 48 requests / 256 KiB text / 15 seconds and the first 8 receipts per document.
@@ -61,7 +69,32 @@ does not persist a second report authority. Raw model output is retained by
 Runtime. JSON export bundles the unchanged raw output and the check, including
 source URL/publication/capture labels copied from that retained read; labels
 are not independently verified metadata. Legacy export stays Markdown. No schema/config
-migration or new credential is needed for this BFF/Web release.
+migration or new credential is needed for reading reports. Enabling in-task MCP
+feedback requires the separate connector configuration described below.
+
+## In-task research feedback
+
+`POST /mcp/research` offers the versioned, read-only
+`check_research_draft_v2` tool. It accepts only a bounded JSON draft string and
+`as_of`, never a run ID or URL, and makes no outbound requests or DB writes.
+It returns the draft hash, validator, repairable issues and source-review issues
+within 8 KiB UTF-8 JSON, with total/truncated counts. It does not return the
+draft, create a report authority, match retained quotations, or claim that the
+caller-supplied date equals a task's pinned date. Runtime retains tool receipts.
+The final Web check still uses that task's actual immutable readings.
+
+This route has a separate service-auth chain: only this service's `SERVICE_TOKEN`
+is accepted, never BUSINESS_TOKEN, DEV_LOCAL or static-path exemptions. Register
+that credential in Registry under a dedicated name, allow the exact Futures
+host:port in Runtime/ToolHub MCP policy, discover/check/activate the connector,
+and bind its exact revision to a new Agent version. Never put the credential in
+prompts, Web or Git. Existing tasks retain their old bindings. MCP registration
+and these deployment/configuration steps are not performed by service startup.
+
+New submission instructions request at most two draft checks and correction of
+repairable issues without changing quotations or dropping key evidence. This is
+an Agent instruction, not a new hard per-tool quota; existing Runtime step/model
+budgets bound execution. No new decision loop or Runtime business rule is added.
 
 The small CSS/React foundation and bounded HTTP proxy were copied from the recorded integration commit. Each repository owns its copy, dependency lock and tests; no build reads the sibling Web. Existing UI appearance is preserved for extraction. Complete redesign and real desktop/narrow-screen workflows remain the platform P3 gate.
 

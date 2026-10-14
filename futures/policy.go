@@ -9,7 +9,7 @@ import (
 
 // Only static GET/HEAD paths bypass the user token. No API or operational paths.
 func PublicPath(r *http.Request) bool {
-	return (r.Method == "GET" || r.Method == "HEAD") && r.URL.Path != "/api" && !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/readyz" && r.URL.Path != "/metrics"
+	return (r.Method == "GET" || r.Method == "HEAD") && r.URL.Path != "/api" && !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/mcp" && !strings.HasPrefix(r.URL.Path, "/mcp/") && r.URL.Path != "/readyz" && r.URL.Path != "/metrics"
 }
 
 // Validate after SDK token selection, including legacy BUSINESS_TOKEN -> ADMIN_TOKEN.

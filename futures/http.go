@@ -20,7 +20,17 @@ type Server struct {
 	KnowledgeURL, WebDir string
 }
 
-func (s *Server) Handler() http.Handler { return servicehttp.New(s.HTTP, nil, s.Routes) }
+func (s *Server) Handler() http.Handler {
+	web := servicehttp.New(s.HTTP, nil, s.Routes)
+	research := s.researchMCPHandler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" || strings.HasPrefix(r.URL.Path, "/mcp/") {
+			research.ServeHTTP(w, r)
+			return
+		}
+		web.ServeHTTP(w, r)
+	})
+}
 func (s *Server) Routes(mux *http.ServeMux) {
 	s.reportRoute(mux)
 	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {

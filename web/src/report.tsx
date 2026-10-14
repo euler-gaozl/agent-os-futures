@@ -71,6 +71,8 @@ const measure: Record<string, string> = {
   flow: "区间流量",
   cumulative_flow: "累计流量",
   capacity: "产能",
+  ratio: "比率",
+  commitment: "未执行合同",
 };
 export function CheckedReport({
   check,
