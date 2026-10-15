@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ResearchAnswer } from "./evidence";
 import { TaskRetainedWork } from "./drafts";
+import { TaskFailureNotice, TaskReadFailure } from "./task-status";
+import { taskReadReducer, watchTask } from "./task-polling";
 import {
   ArrowLeft,
   ArrowUp,
@@ -39,17 +41,6 @@ type Action = {
   name: string;
   description: string;
 };
-function failureMessage(error: string) {
-  if (error.includes("credential"))
-    return "研究模型尚未连接。请由工作区管理员完成连接后继续。";
-  if (error.includes("model output is incomplete or truncated"))
-    return "模型回复达到单次输出上限，研究记录尚未生成。已读取的资料仍可在下方回查。";
-  if (error.includes("model token budget exhausted"))
-    return "本任务剩余预算不足以预留下一次模型请求，任务已停止。已读取的资料仍可在下方回查。";
-  if (error.includes("context budget exceeded"))
-    return "任务上下文超出当前执行配置的上限，尚未完成压缩恢复。已读取的资料仍可在下方回查。";
-  return error || "执行过程中出现问题，研究进度已经保留。";
-}
 function Futures() {
   const [actions, setActions] = useState<Action[]>([]),
     [tasks, setTasks] = useState<any[]>([]),
@@ -66,7 +57,7 @@ function Futures() {
     ),
     [question, setQuestion] = useState(""),
     [selected, setSelected] = useState(""),
-    [result, setResult] = useState<any>(null),
+    [readRetry, setReadRetry] = useState(0),
     [error, setError] = useState(""),
     [connected, setConnected] = useState(false),
     [busy, setBusy] = useState(false),
@@ -76,6 +67,10 @@ function Futures() {
     [notice, setNotice] = useState(""),
     [historySearch, setHistorySearch] = useState(""),
     [authRequired, setAuthRequired] = useState(false);
+  const [{ result, error: readError, reading }, dispatchRead] = useReducer(
+    taskReadReducer<any>,
+    { selected: "", result: null, error: null, reading: false },
+  );
   const key = useRef(crypto.randomUUID()),
     input = useRef<HTMLTextAreaElement>(null);
   const load = useCallback(async () => {
@@ -112,34 +107,18 @@ function Futures() {
     return () => clearInterval(id);
   }, [load]);
   useEffect(() => {
-    if (!selected) {
-      setResult(null);
-      return;
-    }
-    let alive = true;
-    setResult(null);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const r = await api("/tasks/" + selected);
-        if (alive) {
-          setResult(r);
-          if (!["completed", "failed", "cancelled"].includes(r.status))
-            timer = setTimeout(poll, 2500);
-        }
-      } catch (e) {
-        if (alive) {
-          setNotice((e as Error).message);
-          timer = setTimeout(poll, 6000);
-        }
-      }
-    };
-    void poll();
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [selected]);
+    dispatchRead({ type: "select", task: selected });
+    if (!selected) return;
+    // A same-task GET retry keeps its last successful detail and retained work.
+    // Selecting another task clears the old detail; cleanup rejects late replies.
+    return watchTask({
+      task: selected,
+      read: (path) => api(path),
+      onTask: (value) => dispatchRead({ type: "received", task: value }),
+      onError: (error) => dispatchRead({ type: "failed", error }),
+      onReading: (reading) => dispatchRead({ type: "reading", reading }),
+    });
+  }, [selected, readRetry]);
   const choose = (a: Action) => {
     setAction(a);
     key.current = crypto.randomUUID();
@@ -518,6 +497,14 @@ function Futures() {
               <ArrowLeft size={15} />
               开始新研究
             </button>
+            {readError !== null && (
+              <TaskReadFailure
+                error={readError}
+                hasTask={Boolean(result)}
+                reading={reading}
+                retry={() => setReadRetry((value) => value + 1)}
+              />
+            )}
             {result ? (
               <>
                 <header>
@@ -616,11 +603,7 @@ function Futures() {
                     </ResearchAnswer>
                   </article>
                 ) : result.status === "failed" ? (
-                  <div className="research-failure">
-                    <FileText size={27} />
-                    <h3>这次研究还未完成</h3>
-                    <p>{failureMessage(result.error || "")}</p>
-                  </div>
+                  <TaskFailureNotice error={result.error || ""} />
                 ) : result.status === "waiting_unknown" ? (
                   <div className="research-failure">
                     <h3>有一项执行结果需要核对</h3>
@@ -660,11 +643,11 @@ function Futures() {
                   </button>
                 )}
               </>
-            ) : (
+            ) : readError === null ? (
               <div className="research-wait">
                 <Spinner />
               </div>
-            )}
+            ) : null}
           </main>
         )}
       </div>
