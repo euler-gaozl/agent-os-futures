@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { BookOpen } from "lucide-react";
 import { api, Spinner } from "./shared";
 import {
   CheckedReport,
@@ -6,7 +7,7 @@ import {
   type OpenSource,
   type SourceProof,
 } from "./report";
-import { SourceDialog } from "./evidence";
+import { ResearchAnswer, SourceDialog } from "./evidence";
 
 type DraftItem = {
   operation_id: string;
@@ -41,6 +42,7 @@ export function DraftContent({
   onSource: OpenSource;
 }) {
   const feedback = draft.feedback;
+  const completed = draft.task_status === "completed";
   const revise = Array.isArray(feedback.revise) ? feedback.revise : [];
   const sourceReview = Array.isArray(feedback.source_review)
     ? feedback.source_review
@@ -53,9 +55,11 @@ export function DraftContent({
   return (
     <>
       <div className="draft-warning" role="note">
-        <strong>送检草稿 · 尚无最终回答</strong>
+        <strong>送检草稿 · {completed ? "历史版本" : "尚无最终回答"}</strong>
         <p>
-          这是任务中途保存的版本。任务仍未完成，草稿中的事实、日期和引用可能有误，不能当作已完成的研究报告。
+          {completed
+            ? "任务执行已完成。这是中途保存的草稿，不能替代最终回答；草稿中的事实、日期和引用可能有误，研究核验结果仍须分别查看。"
+            : "这是任务中途保存的版本。任务仍未完成，草稿中的事实、日期和引用可能有误，不能当作已完成的研究报告。"}
         </p>
         <small>
           保存时间：{new Date(draft.recorded_at).toLocaleString("zh-CN")}
@@ -96,7 +100,8 @@ export function DraftContent({
         </details>
       </details>
       <p className="draft-recheck-note">
-        下面按当前检查器回查这份草稿及任务留存的原文；回查不会把任务改成完成。
+        当前检查器：{draft.check.validator}
+        。下面回查这份草稿及任务留存的原文；回查不会改变任务状态或当时的反馈。
       </p>
       <CheckedReport
         check={draft.check}
@@ -105,6 +110,33 @@ export function DraftContent({
         rawLabel="送检草稿原文（完整保留）"
       />
     </>
+  );
+}
+
+export function TaskRetainedWork({
+  task,
+  status,
+  hasResult,
+}: {
+  task: string;
+  status: string;
+  hasResult: boolean;
+}) {
+  if (!["completed", "failed", "cancelled", "waiting_unknown"].includes(status))
+    return null;
+  return (
+    <article className="research-document">
+      <RetainedDrafts key={task + ":drafts:" + status} task={task} />
+      {!hasResult && (
+        <>
+          <div className="document-heading">
+            <BookOpen size={19} />
+            <span>已保留的资料</span>
+          </div>
+          <ResearchAnswer key={task + ":retained"} task={task} />
+        </>
+      )}
+    </article>
   );
 }
 
@@ -143,7 +175,7 @@ export function RetainedDrafts({ task }: { task: string }) {
         if (live)
           setError(
             e.status === 404
-              ? "当前服务尚未配置草稿回查；已保存资料仍可在下方阅读。"
+              ? "当前服务尚未配置草稿回查；仍可从资料回查阅读已保存的资料。"
               : e.message,
           );
       })
@@ -214,7 +246,7 @@ export function RetainedDrafts({ task }: { task: string }) {
     }
   };
   return (
-    <section className="retained-drafts" aria-label="未完成的研究草稿">
+    <section className="retained-drafts" aria-label="留存的研究草稿">
       <header>
         <h2>阶段草稿</h2>
         <p>保留每次送检版本及对应反馈，便于从已有工作继续核对。</p>

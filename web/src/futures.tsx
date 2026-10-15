@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ResearchAnswer } from "./evidence";
-import { RetainedDrafts } from "./drafts";
+import { TaskRetainedWork } from "./drafts";
 import {
   ArrowLeft,
   ArrowUp,
@@ -640,22 +640,11 @@ function Futures() {
                     <p>已完成的进度会自动保存，你可以稍后回来查看。</p>
                   </div>
                 )}
-                {!result.result &&
-                  ["failed", "cancelled", "waiting_unknown"].includes(
-                    result.status,
-                  ) && (
-                    <article className="research-document">
-                      <RetainedDrafts key={result.id + ":drafts"} task={result.id} />
-                      <div className="document-heading">
-                        <BookOpen size={19} />
-                        <span>已保留的资料</span>
-                      </div>
-                      <ResearchAnswer
-                        key={result.id + ":retained"}
-                        task={result.id}
-                      />
-                    </article>
-                  )}
+                <TaskRetainedWork
+                  task={result.id}
+                  status={result.status}
+                  hasResult={Boolean(result.result)}
+                />
                 {["running", "queued", "waiting_children"].includes(
                   result.status,
                 ) && (
