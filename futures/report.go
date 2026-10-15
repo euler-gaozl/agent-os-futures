@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -153,10 +154,10 @@ func issuePath(section string, index int, id string) string {
 func uniqueJSON(raw []byte) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
-	var walk func(int) error
-	walk = func(depth int) error {
+	var walk func(int, string) error
+	walk = func(depth int, path string) error {
 		if depth > 12 {
-			return errors.New("report nesting limit")
+			return formatError("report", "JSON 嵌套深度超过 12 层；请按报告结构组织字段，不嵌套额外对象。")
 		}
 		t, e := d.Token()
 		if e != nil {
@@ -175,16 +176,16 @@ func uniqueJSON(raw []byte) error {
 				}
 				s, ok := key.(string)
 				if !ok || keys[s] {
-					return errors.New("duplicate report field")
+					return formatError(jsonFieldPath(path, s), "JSON 含重复字段；同一对象内每个字段只能出现一次，不能用后值覆盖前值。")
 				}
 				keys[s] = true
-				if e = walk(depth + 1); e != nil {
+				if e = walk(depth+1, jsonFieldPath(path, s)); e != nil {
 					return e
 				}
 			}
 		} else if delim == '[' {
-			for d.More() {
-				if e = walk(depth + 1); e != nil {
+			for i := 0; d.More(); i++ {
+				if e = walk(depth+1, fmt.Sprintf("%s[%d]", path, i)); e != nil {
 					return e
 				}
 			}
@@ -194,19 +195,22 @@ func uniqueJSON(raw []byte) error {
 		_, e = d.Token()
 		return e
 	}
-	if e := walk(0); e != nil {
+	if e := walk(0, ""); e != nil {
 		return e
 	}
 	if _, e := d.Token(); e != io.EOF {
-		return errors.New("extra report content")
+		return formatError("report", "完整 JSON 值后含多余内容；只提交一个报告对象，不附代码围栏、说明或第二个 JSON 值。")
 	}
 	return nil
 }
 func parseReport(raw string) (*ResearchReport, error) {
 	if len(raw) > 96<<10 {
-		return nil, errors.New("report size limit")
+		return nil, formatError("report", "结构检查输入超过 98304 UTF-8 字节（96 KiB）；原始结果仍保留，不会被截断或自动修复。")
 	}
 	if e := uniqueJSON([]byte(raw)); e != nil {
+		return nil, e
+	}
+	if e := checkReportJSONShape([]byte(raw), reflect.TypeOf(ResearchReport{}), ""); e != nil {
 		return nil, e
 	}
 	d := json.NewDecoder(strings.NewReader(raw))
@@ -215,12 +219,34 @@ func parseReport(raw string) (*ResearchReport, error) {
 	if e := d.Decode(&out); e != nil {
 		return nil, e
 	}
-	if out.Schema != reportSchema || out.Facts == nil || out.Comparisons == nil || len(out.Facts) > 40 || len(out.Comparisons) > 30 || len(out.Questions) < 1 || len(out.Questions) > 8 {
-		return nil, errors.New("unsupported report schema or count")
+	if out.Schema != reportSchema {
+		return nil, formatError("schema", "schema 必须为 futures-evidence-v1；不能省略或使用其他版本。")
 	}
-	for _, q := range out.Questions {
-		if q.FactIDs == nil || q.ComparisonIDs == nil || q.Missing == nil {
-			return nil, errors.New("question arrays required")
+	for _, a := range []struct {
+		path    string
+		missing bool
+	}{{"questions", out.Questions == nil}, {"facts", out.Facts == nil}, {"comparisons", out.Comparisons == nil}} {
+		if a.missing {
+			return nil, formatError(a.path, "必须提供数组；不能省略或使用 null，没有项目时使用 []。")
+		}
+	}
+	if len(out.Questions) < 1 || len(out.Questions) > 8 {
+		return nil, formatError("questions", "questions 必须包含 1–8 个问题。")
+	}
+	if len(out.Facts) > 40 {
+		return nil, formatError("facts", "facts 至多包含 40 项事实；原始结果仍保留。")
+	}
+	if len(out.Comparisons) > 30 {
+		return nil, formatError("comparisons", "comparisons 至多包含 30 组比较；原始结果仍保留。")
+	}
+	for i, q := range out.Questions {
+		for _, a := range []struct {
+			name    string
+			missing bool
+		}{{"fact_ids", q.FactIDs == nil}, {"comparison_ids", q.ComparisonIDs == nil}, {"missing", q.Missing == nil}} {
+			if a.missing {
+				return nil, formatError(fmt.Sprintf("questions[%d].%s", i, a.name), "必须提供数组；不能省略或使用 null，没有项目时使用 []。")
+			}
 		}
 	}
 	return &out, nil
@@ -339,12 +365,13 @@ func comparableExpressions(current, baseline ReportFact) bool {
 }
 func checkReport(ctx context.Context, raw, asOf string, read quoteReader) ReportCheck {
 	digest := sha256.Sum256([]byte(raw))
-	out := ReportCheck{Validator: "futures-report-check-v4", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
+	out := ReportCheck{Validator: "futures-report-check-v5", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
 	add := func(path, code, msg string) { out.Issues = append(out.Issues, ReportIssue{path, code, msg}) }
 	report, e := parseReport(raw)
 	if e != nil {
 		out.Status = "unstructured"
-		add("report", "format", "原始回答未符合结构化资料格式，不能作为已核验报告。")
+		path, message := reportFormatIssue(raw, e)
+		add(path, "format", message)
 		return out
 	}
 	out.Report = report
