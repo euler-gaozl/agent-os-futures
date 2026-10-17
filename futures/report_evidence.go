@@ -1,5 +1,7 @@
 package futures
 
+import "fmt"
+
 // Evidence declarations describe uncertainty; they never upgrade a quotation
 // into truth. They are optional so historical v1 reports remain readable.
 type ReportEvidence struct {
@@ -72,21 +74,34 @@ func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, c
 	for _, id := range q.ComparisonIDs {
 		questionComparisons[id] = true
 	}
-	for _, f := range q.Findings {
+	for findingIndex, f := range q.Findings {
+		findingPath := fmt.Sprintf("%s.findings[%d]", path, findingIndex)
 		if (f.Kind != "observation" && f.Kind != "conflict" && f.Kind != "limitation") || !bounded(f.Text, 1200) || len(f.FactIDs) == 0 || len(f.FactIDs) > 40 || f.ComparisonIDs == nil || len(f.ComparisonIDs) > 30 {
-			add(path, "finding_fields", "资料解读需有 observation/conflict/limitation 类型、有界文字和本问题的事实引用；comparison_ids 必须为数组。")
+			add(findingPath, "finding_fields", "资料解读需有 observation/conflict/limitation 类型、有界文字和本问题的事实引用；comparison_ids 必须为数组。")
 		}
 		seen := map[string]bool{}
-		for _, id := range f.FactIDs {
-			if facts[id].ID == "" || !questionFacts[id] || seen[id] {
-				add(path, "finding_reference", "资料解读的事实引用不存在、重复，或不属于本问题。")
+		for refIndex, id := range f.FactIDs {
+			refPath := fmt.Sprintf("%s.fact_ids[%d]", findingPath, refIndex)
+			switch {
+			case facts[id].ID == "":
+				add(refPath, "finding_reference", "该位置的事实 ID 不存在于 facts；请核对实际支持这条解读的事实，不能编造或借用无关事实通过检查。")
+			case seen[id]:
+				add(refPath, "finding_reference", "该位置重复引用了本条解读中的同一事实；每条解读的 fact_ids 不得重复。")
+			case !questionFacts[id]:
+				add(refPath, "finding_reference", "该位置的事实存在于 facts，但未列入所属问题的 fact_ids；核对支持关系后修正本问题的引用归属，不能仅删除相关证据换取通过。")
 			}
 			seen[id] = true
 		}
 		seen = map[string]bool{}
-		for _, id := range f.ComparisonIDs {
-			if !comparisons[id] || !questionComparisons[id] || seen[id] {
-				add(path, "finding_reference", "资料解读的比较引用不存在、重复，或不属于本问题。")
+		for refIndex, id := range f.ComparisonIDs {
+			refPath := fmt.Sprintf("%s.comparison_ids[%d]", findingPath, refIndex)
+			switch {
+			case !comparisons[id]:
+				add(refPath, "finding_reference", "该位置的比较 ID 不存在于 comparisons；请核对实际支持这条解读的比较。")
+			case seen[id]:
+				add(refPath, "finding_reference", "该位置重复引用了本条解读中的同一比较；每条解读的 comparison_ids 不得重复。")
+			case !questionComparisons[id]:
+				add(refPath, "finding_reference", "该位置的比较存在于 comparisons，但未列入所属问题的 comparison_ids；核对支持关系后修正本问题的引用归属。")
 			}
 			seen[id] = true
 		}
