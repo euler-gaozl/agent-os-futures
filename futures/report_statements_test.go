@@ -84,6 +84,23 @@ func TestStatementsCannotBypassNumericFactChecks(t *testing.T) {
 	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); !issue(c, "statement_quantity") {
 		t.Fatalf("full-width quantity hidden in a statement was accepted: %+v", c)
 	}
+	// A multiplier is a numeric claim even without a digit.
+	r = qualitativeReport()
+	r.Statements[0].Text = "库存翻倍，样本明细未披露。"
+	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); !issue(c, "statement_quantity") {
+		t.Fatalf("multiplier hidden in a statement was accepted: %+v", c)
+	}
+	// Limitations must not become a second place to put an unchecked quantity.
+	r = qualitativeReport()
+	r.Statements[0].Limitations = []string{"正文提到库存100，未取得完整表格。"}
+	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); !issue(c, "statement_quantity") {
+		t.Fatalf("quantity hidden in a statement limitation was accepted: %+v", c)
+	}
+	r = qualitativeReport()
+	r.Statements[0].Limitations = []string{"正文只覆盖前3页，样本明细未披露。"}
+	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); issue(c, "statement_quantity") {
+		t.Fatalf("coverage page count in a limitation was treated as a quantity: %+v", c)
+	}
 	// A statement may name dates, page ranges, periods and sample counts.
 	for _, allowed := range []string{
 		"该说明适用于2026年10-12月，样本明细未披露。",

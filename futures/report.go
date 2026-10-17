@@ -145,6 +145,7 @@ var proseQuantity = regexp.MustCompile(`(?:[0-9]+(?:\.[0-9]+)?|[零一二三四�
 var statementDate = regexp.MustCompile(`[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}|[0-9]{4}[-/][0-9]{1,2}|[0-9]{4}年(?:[0-9]{1,2}月(?:[0-9]{1,2}[日号])?)?|[0-9]{1,2}月(?:[0-9]{1,2}[日号])?|[0-9]{1,2}[日号]|[0-9]{1,2}季度|[0-9]{1,2}季|[0-9]{1,2}周|Q[1-4]|[0-9]{1,2}\s*(?:~|～|-|—|至|到)\s*[0-9]{1,2}月`)
 var statementCounter = regexp.MustCompile(`^(?:页|条|期|周|月|日|号|年|季度|季|批|家|份|篇|段|个|种|类|次|轮|项|问|人|艘|张|册|章|节|版|台|套|座|辆|头|只|亩|米|公里|平方米)`)
 var statementDigits = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
+var chineseMultiplier = regexp.MustCompile(`翻倍|翻番|成倍`)
 
 func normalizeWidthDigits(value string) string {
 	var b strings.Builder
@@ -166,7 +167,7 @@ func normalizeWidthDigits(value string) string {
 // measurement unit are already rejected by proseQuantity.
 func numericClaim(value string) bool {
 	v := normalizeWidthDigits(value)
-	if proseQuantity.MatchString(v) {
+	if proseQuantity.MatchString(v) || chineseMultiplier.MatchString(v) {
 		return true
 	}
 	v = statementDate.ReplaceAllString(v, "")
@@ -557,6 +558,8 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		for _, note := range s.Limitations {
 			if !bounded(note, 500) {
 				add(path, "statement_fields", "来源限制说明为空或超限。")
+			} else if numericClaim(note) {
+				add(path, "statement_quantity", "来源限制不能夹带市场数量（日期、页码、期数等非报数计数除外）；报数必须保留为 facts 并接受数值、单位和统计期检查。")
 			}
 		}
 		if len(s.Limitations) > 0 {
