@@ -272,7 +272,7 @@ func TestLegacyReportsWithoutStatementsAndNewCheckerVersion(t *testing.T) {
 
 func TestReportInstructionsDescribeQualitativeEvidence(t *testing.T) {
 	text := reportInstructions("2026-10-09")
-	for _, want := range []string{`"statements"`, `"statement_ids"`, "非数值论据", "不证明解释", "20说明"} {
+	for _, want := range []string{`"statements"`, `"statement_ids"`, "非数值论据", "不证明解释", "20说明", "selected=false", "不得改以普通正文结束"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("instructions missing %q", want)
 		}
