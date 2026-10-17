@@ -66,6 +66,7 @@ function Futures() {
     [mobileNav, setMobileNav] = useState(false),
     [notice, setNotice] = useState(""),
     [historySearch, setHistorySearch] = useState(""),
+    [sourceID, setSourceID] = useState(""),
     [authRequired, setAuthRequired] = useState(false);
   const [{ result, error: readError, reading }, dispatchRead] = useReducer(
     taskReadReducer<any>,
@@ -544,6 +545,28 @@ function Futures() {
                     </div>
                   );
                 })()}
+                <div className="source-task">
+                  <small>
+                    输入源任务 ID（人工核对，不自动写入证据链）
+                  </small>
+                  <div className="button-row">
+                    <input
+                      value={sourceID}
+                      onChange={(event) => setSourceID(event.target.value)}
+                      placeholder="例如 a526d178…"
+                      aria-label="源任务 ID"
+                    />
+                    <button
+                      className="text-button"
+                      disabled={
+                        !/^[A-Za-z0-9_-]{6,128}$/.test(sourceID.trim())
+                      }
+                      onClick={() => setSelected(sourceID.trim())}
+                    >
+                      打开源任务
+                    </button>
+                  </div>
+                </div>
                 <div className="research-progress">
                   <div>
                     <span className="progress-number">1</span>

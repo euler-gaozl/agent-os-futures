@@ -811,3 +811,7 @@ body {
 .related-tasks { margin: 0 0 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .related-tasks small { display: block; margin-bottom: 6px; color: var(--muted); }
 .related-tasks .button-row { flex-wrap: wrap; gap: 8px; }
+
+.source-task { margin: 0 0 18px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 10px; }
+.source-task small { display: block; margin-bottom: 6px; color: var(--muted); }
+.source-task input { min-width: 240px; }
