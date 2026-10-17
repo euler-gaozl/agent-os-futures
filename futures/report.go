@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/euler-gaozl/agent-os-sdk/servicehttp"
@@ -31,12 +32,14 @@ type ResearchReport struct {
 	AsOf        string             `json:"as_of"`
 	Questions   []ReportQuestion   `json:"questions"`
 	Facts       []ReportFact       `json:"facts"`
+	Statements  []ReportStatement  `json:"statements,omitempty"`
 	Comparisons []ReportComparison `json:"comparisons"`
 }
 type ReportQuestion struct {
 	ID            string          `json:"id"`
 	Question      string          `json:"question"`
 	FactIDs       []string        `json:"fact_ids"`
+	StatementIDs  []string        `json:"statement_ids,omitempty"`
 	ComparisonIDs []string        `json:"comparison_ids"`
 	Missing       []string        `json:"missing"`
 	Findings      []ReportFinding `json:"findings,omitempty"`
@@ -102,6 +105,7 @@ type ReportCheck struct {
 	Notice             string            `json:"notice"`
 	Report             *ResearchReport   `json:"report,omitempty"`
 	Facts              []FactCheck       `json:"facts"`
+	Statements         []StatementCheck  `json:"statements"`
 	Comparisons        []ComparisonCheck `json:"comparisons"`
 	Issues             []ReportIssue     `json:"issues"`
 }
@@ -138,6 +142,49 @@ var unsupportedAssertion = regexp.MustCompile(`主要发生|主要集中|导致|
 var sameBasisStatement = regexp.MustCompile(`(?:^|[。；\n])同口径[，：]`)
 var temporalLabel = regexp.MustCompile(`[0-9]{1,4}(?:年|月|日|周|季度)`)
 var proseQuantity = regexp.MustCompile(`(?:[0-9]+(?:\.[0-9]+)?|[零一二三四五六七八九十两][零一二三四五六七八九十百千万亿两点]*)\s*(?:万吨|吨|千克|公斤|亿|万|元|%|％|‰|倍|桶|立方米|蒲式耳|个百分点)|[0-9]+手|百分之[0-9零一二三四五六七八九十百千万亿两点]+`)
+var statementDate = regexp.MustCompile(`[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}|[0-9]{4}[-/][0-9]{1,2}|[0-9]{4}年(?:[0-9]{1,2}月(?:[0-9]{1,2}[日号])?)?|[0-9]{1,2}月(?:[0-9]{1,2}[日号])?|[0-9]{1,2}[日号]|[0-9]{1,2}季度|[0-9]{1,2}季|[0-9]{1,2}周|Q[1-4]|[0-9]{1,2}\s*(?:~|～|-|—|至|到)\s*[0-9]{1,2}月`)
+var statementCounter = regexp.MustCompile(`^(?:页|条|期|周|月|日|号|年|季度|季|批|家|份|篇|段|个|种|类|次|轮|项|问|人|艘|张|册|章|节|版|台|套|座|辆|头|只|亩|米|公里|平方米)`)
+var statementDigits = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
+
+func normalizeWidthDigits(value string) string {
+	var b strings.Builder
+	b.Grow(len(value))
+	for _, r := range value {
+		if r >= '０' && r <= '９' {
+			b.WriteRune('0' + (r - '０'))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// A qualitative statement may name a period, a page range or a sample count,
+// but it must not carry a market observation that belongs in facts. Decimals
+// are always treated as observations; a bare integer needs a non-market
+// counter suffix ("3页", "第3期", "5家"). Chinese-numeral quantities with a
+// measurement unit are already rejected by proseQuantity.
+func numericClaim(value string) bool {
+	v := normalizeWidthDigits(value)
+	if proseQuantity.MatchString(v) {
+		return true
+	}
+	v = statementDate.ReplaceAllString(v, "")
+	for _, r := range v {
+		if unicode.IsDigit(r) && (r < '0' || r > '9') {
+			return true
+		}
+	}
+	for _, loc := range statementDigits.FindAllStringIndex(v, -1) {
+		if strings.Contains(v[loc[0]:loc[1]], ".") {
+			return true
+		}
+		if !statementCounter.MatchString(strings.TrimLeft(v[loc[1]:], " \t")) {
+			return true
+		}
+	}
+	return false
+}
 
 func validDate(value string) (time.Time, bool) {
 	t, e := time.Parse("2006-01-02", value)
@@ -240,6 +287,9 @@ func parseReport(raw string) (*ResearchReport, error) {
 	}
 	if len(out.Facts) > 40 {
 		return nil, formatError("facts", "facts 至多包含 40 项事实；原始结果仍保留。")
+	}
+	if len(out.Statements) > 20 {
+		return nil, formatError("statements", "statements 至多包含 20 项非数值说明；原始结果仍保留。")
 	}
 	if len(out.Comparisons) > 30 {
 		return nil, formatError("comparisons", "comparisons 至多包含 30 组比较；原始结果仍保留。")
@@ -370,7 +420,7 @@ func comparableExpressions(current, baseline ReportFact) bool {
 }
 func checkReport(ctx context.Context, raw, asOf string, read quoteReader) ReportCheck {
 	digest := sha256.Sum256([]byte(raw))
-	out := ReportCheck{Validator: "futures-report-check-v7", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
+	out := ReportCheck{Validator: "futures-report-check-v8", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断、资料解读及非数值原文说明由 Agent 标注，须结合原文复核；引文匹配不等于解释成立。", Facts: []FactCheck{}, Statements: []StatementCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
 	add := func(path, code, msg string) { out.Issues = append(out.Issues, ReportIssue{path, code, msg}) }
 	report, e := parseReport(raw)
 	if e != nil {
@@ -475,6 +525,68 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		consistent[f.ID] = check.Consistent
 		out.Facts = append(out.Facts, check)
 	}
+	// Qualitative statements are checked separately. They never feed the
+	// comparison arithmetic and must not carry a quantity of their own.
+	statements := map[string]ReportStatement{}
+	for index, s := range report.Statements {
+		startIssues := len(out.Issues)
+		path := issuePath("statements", index, s.ID)
+		check := StatementCheck{ID: s.ID, ContentKind: s.ContentKind, QuoteOffset: -1}
+		if !reportID.MatchString(s.ID) || statements[s.ID].ID != "" || facts[s.ID].ID != "" {
+			add(path, "identity", "说明编号无效、重复或与事实编号冲突。")
+		} else {
+			statements[s.ID] = s
+		}
+		if !bounded(s.Text, 800) {
+			add(path, "statement_fields", "非数值说明必须为有界文字。")
+		} else if numericClaim(s.Text) {
+			add(path, "statement_quantity", "非数值说明不能夹带数量（日期除外）；报数必须保留为 facts 并接受数值、单位和统计期检查。")
+		}
+		switch s.ContentKind {
+		case "publisher_text":
+		case "ai_summary":
+			add(path, "statement_ai_summary", "该说明只是 AI 摘要线索，不能当作原发布者已确认的说明；须取得支持它的正文。")
+		case "unverified":
+			add(path, "statement_unverified", "该说明的来源性质尚未确认，只保留待核，不能作为已验证解释。")
+		default:
+			add(path, "statement_fields", "content_kind 必须为 publisher_text、ai_summary 或 unverified。")
+		}
+		if s.Limitations == nil || len(s.Limitations) > 8 {
+			add(path, "statement_fields", "来源限制必须为数组，至多八项；没有已知限制时使用 []。")
+		}
+		for _, note := range s.Limitations {
+			if !bounded(note, 500) {
+				add(path, "statement_fields", "来源限制说明为空或超限。")
+			}
+		}
+		if len(s.Limitations) > 0 {
+			add(path, "statement_limitations", "该说明标注了来源限制，需回读核对；引文匹配不能解除样本、转载、正文截断或版本冲突等限制。")
+		}
+		if !reportID.MatchString(s.DocumentID) || !bounded(s.Quote, 2400) {
+			add(path, "statement_source", "必须提供本任务读过的文档与有界逐字引文；不得用自由文字代替。")
+		} else if read != nil {
+			proof, err := read(ctx, ReportSource{DocumentID: s.DocumentID, Quote: s.Quote})
+			if err != nil {
+				add(path, "retained_statement_quote", "未能在本任务有界留存资料中逐字确认该说明的引用；可能是原文不符、未读取、超限或服务不可用。")
+			} else {
+				check.QuoteMatched = true
+				check.OperationID = proof.Operation
+				check.Version = proof.Version
+				check.QuoteOffset = proof.Offset
+				check.OriginalHash, check.Segments = proof.OriginalHash, proof.Segments
+				check.SourceURL, check.PublishedLabel, check.CapturedLabel = proof.SourceURL, proof.Published, proof.Captured
+			}
+		}
+		check.Consistent = read != nil && len(out.Issues) == startIssues
+		out.Statements = append(out.Statements, check)
+	}
+	if len(report.Statements) > 0 {
+		if read == nil {
+			add("statements", "statement_review", "非数值说明的结构字段已检查，但未读取本任务回执；引文是否存在及解释是否成立均未核对。")
+		} else {
+			add("statements", "statement_review", "非数值说明已绑定留存引文，但引文匹配不证明解释、样本定义或正文覆盖范围成立；须结合原文复核，也不能替代数值报数的检查。")
+		}
+	}
 	comparisons := map[string]bool{}
 	for index, c := range report.Comparisons {
 		path := issuePath("comparisons", index, c.ID)
@@ -520,7 +632,7 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		if unsupportedAssertion.MatchString(q.Question) {
 			add(path, "unsupported_assertion", "问题文本含未经验证的归因或整体判断，请改为中性的待查问题。")
 		}
-		if !reportID.MatchString(q.ID) || questions[q.ID] || !bounded(q.Question, 400) || len(q.FactIDs) > 40 || len(q.ComparisonIDs) > 30 || len(q.Missing) > 12 {
+		if !reportID.MatchString(q.ID) || questions[q.ID] || !bounded(q.Question, 400) || len(q.FactIDs) > 40 || len(q.StatementIDs) > 20 || len(q.ComparisonIDs) > 30 || len(q.Missing) > 12 {
 			add(path, "question", "问题或引用数量超限、内容为空或编号重复。")
 		}
 		questions[q.ID] = true
@@ -528,6 +640,16 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 			if _, ok := facts[id]; !ok {
 				add(path, "fact_reference", "问题引用了不存在的事实。")
 			}
+		}
+		questionStatements := map[string]bool{}
+		for _, id := range q.StatementIDs {
+			switch {
+			case statements[id].ID == "":
+				add(path, "statement_reference", "问题引用了不存在的非数值说明。")
+			case questionStatements[id]:
+				add(path, "statement_reference", "问题的 statement_ids 重复引用了同一说明。")
+			}
+			questionStatements[id] = true
 		}
 		// Catch explicit relabelling, not general prose entailment. A question
 		// about missing plans remains possible in Missing; findings belong in facts.
@@ -556,10 +678,10 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 				add(path, "missing", "待查资料描述为空或超限。")
 			}
 		}
-		if len(q.FactIDs) == 0 && len(q.Missing) == 0 {
+		if len(q.FactIDs) == 0 && len(q.StatementIDs) == 0 && len(q.Missing) == 0 {
 			add(path, "empty", "问题必须列出对应证据或具体待查资料。")
 		}
-		checkFindings(q, path, facts, comparisons, add)
+		checkFindings(q, path, facts, comparisons, statements, add)
 	}
 	if read == nil {
 		add("report", "retained_unchecked", "此为草稿检查，未读取任务回执。原文存在性、真实性及报告完整性尚未验证。")
@@ -717,11 +839,12 @@ func (s *Server) reportRoute(mux *http.ServeMux) {
 func reportInstructions(asOf string) string {
 	return fmt.Sprintf(`
 时间分类基准日固定为 %s，用于过去/未来分类，不代表历史时点已知信息回测。最后回答只输出一个 JSON 对象（不加代码围栏）：
-{"schema":"futures-evidence-v1","as_of":"%s","questions":[{"id":"q1","question":"待核核心问题","fact_ids":["f1"],"comparison_ids":[],"missing":[]}],"facts":[{"id":"f1","metric":"原文指标名称","value":"十进制数值","unit":"原文单位","scope":"原文样本范围","measure":"stock 或 flow 或 cumulative_flow 或 capacity 或 ratio 或 commitment","nature":"reported 或 estimate 或 plan","period":{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"},"source":{"document_id":"实际document_read的ID","quote":"逐字复制已读取原文，不添加或改写任何字符","period_text":"quote内明确带年份的原文日期"}}],"comparisons":[{"id":"c1","current":"后一期fact编号","baseline":"前一期fact编号"}]}
+{"schema":"futures-evidence-v1","as_of":"%s","questions":[{"id":"q1","question":"待核核心问题","fact_ids":["f1"],"statement_ids":["s1"],"comparison_ids":[],"missing":[]}],"facts":[{"id":"f1","metric":"原文指标名称","value":"十进制数值","unit":"原文单位","scope":"原文样本范围","measure":"stock 或 flow 或 cumulative_flow 或 capacity 或 ratio 或 commitment","nature":"reported 或 estimate 或 plan","period":{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"},"source":{"document_id":"实际document_read的ID","quote":"逐字复制已读取原文，不添加或改写任何字符","period_text":"quote内明确带年份的原文日期"}}],"statements":[{"id":"s1","text":"来源性质、样本定义或正文覆盖范围的有界说明","document_id":"实际document_read的ID","quote":"逐字复制已读取原文，不添加或改写任何字符","content_kind":"publisher_text 或 ai_summary 或 unverified","limitations":[]}],"comparisons":[{"id":"c1","current":"后一期fact编号","baseline":"前一期fact编号"}]}
 每项 fact 还应包含 evidence：{"content_kind":"publisher_text 或 ai_summary 或 unverified","period_basis":"explicit 或 inferred 或 unknown","period_note":"日期依据及仍未确认之处","limitations":[]}。publisher_text 只说明来自发布正文，不表示真实或独立调查；转载、正文受限、样本变化、版本冲突等逐条写入 limitations。AI 生成摘要的数字只能标 ai_summary 并保留为调查线索，不得当原发布者已确认报数。无法取得正文仍保留这条线索及缺口，不编造支持引文。
+非数值论据使用 statements：每项必须包含 id、text（来源性质、样本定义、正文覆盖范围或证据边界的有界说明，至多800字符）、document_id、quote（本任务实际读过的逐字原文，至多2400字符）、content_kind（publisher_text、ai_summary 或 unverified）和 limitations（数组，没有已知限制时使用 []，至多8项、每项500字符）。statements 不写市场报数；统计日期，以及页码、期数、样本家数等非报数计数可以保留；不带 value/unit/period，数值报数仍必须放入 facts 并接受数值、单位和统计期检查。问题用 statement_ids 列出本问题采用的说明；finding 用 statement_ids 引用本问题已列入的说明。引用 statements 的 finding 允许 fact_ids 为空，但不能夹带市场数量（日期、页码、期数、样本家数等非报数计数除外）；数值报数须在只引用 facts 的解读中表达并接受检查。来源性质为 AI 摘要或未确认时仍只是线索，不因新增字段变成实绩或已验证解释。说明的引文匹配同样只证明原文存在，不证明解释、样本定义或覆盖范围成立。
 没有完整统计期时允许 period.start 和 period.end 同时为 ""，period_basis=unknown，并在 period_note 写清缺什么依据；source.period_text 保留实际读到的日期片段，没有则留空。年份等由标题或发布日期推断时标 inferred 并说明依据，不能悄悄当 explicit。发布日期不能代替统计日，周度库存不能把周报发布日当库存时点。此类待核提示不要求强行补日期。
-有支持事实的 question 用 findings 数组直接回答本问题；完全没有支持事实时允许 findings=[]，在 missing 中如实列出阻断该问题的具体依据，不借用或编造事实引用。每项 finding 为 {"kind":"observation 或 conflict 或 limitation","text":"对该核心问题的客观回答及证据边界","fact_ids":["本问题关联事实ID"],"comparison_ids":[]}。分别说明直接答复、计算核验与原因解释，不只重复问题或罗列数据。只有两项报数的指标、单位、样本、数量类型和资料性质一致，原文明示两期同口径，统计期明确、互不重叠且前后顺序成立时，才据原文说明该来源报数上升、下降或不变，并关联两项事实。区分实绩、估计和计划报数，不能把估计或计划的方向说成实际变化；任一前提不明或冲突时，只并列报数与具体限制。此类有限观察不解除 source_limitations，不把来源报数提升为事实真实或已验证差额；AI 摘要、未确认来源及推断或未知统计期的现有比较限制仍保留。
+有支持事实的 question 用 findings 数组直接回答本问题；完全没有支持事实时允许 findings=[]，在 missing 中如实列出阻断该问题的具体依据，不借用或编造事实引用。每项 finding 为 {"kind":"observation 或 conflict 或 limitation","text":"对该核心问题的客观回答及证据边界","fact_ids":["本问题关联事实ID"],"statement_ids":["本问题关联说明ID"],"comparison_ids":[]}。分别说明直接答复、计算核验与原因解释，不只重复问题或罗列数据。只有两项报数的指标、单位、样本、数量类型和资料性质一致，原文明示两期同口径，统计期明确、互不重叠且前后顺序成立时，才据原文说明该来源报数上升、下降或不变，并关联两项事实。区分实绩、估计和计划报数，不能把估计或计划的方向说成实际变化；任一前提不明或冲突时，只并列报数与具体限制。此类有限观察不解除 source_limitations，不把来源报数提升为事实真实或已验证差额；AI 摘要、未确认来源及推断或未知统计期的现有比较限制仍保留。
 存在 source_limitations 或其他比较待核项时，差额与可比性仍保留待核，不自行补算差额、不删除限制换取通过；这不自动阻断原文已支持的方向、时期或性质答复。问题要求差额但尚未满足检查条件时，应明确差额待核及具体原因。原因解释需要额外证据，缺因果证据不能替代对已知事实的回答。所有数值仍须在 facts 保留并关联，解读不是自动验证的结论；source_review 必须按具体提示核对，不等于整份报告禁止作答。
 missing 只列尚未取得且阻断本问题直接答复的具体依据，能够回答时使用 []。原因解释、外部代表性、未来执行跟踪等资料，只有本问题确实要求该结论时才列为 missing，否则放在 findings 的 limitation 中。不能把已经关联的资料、任务明确排除的扩展资料或未请求的比较当成核心缺失；每项限制均须有实际依据，未确认的时间边界保留待核，不断言已经错位。
-quote 必须包含支持该报数的连续原文，最多2400字符，不能跨日期或样本借用其他数字。period_text逐字保留原文统计日期；没有明确年份或窗口时按 evidence 标注推断或未知，不为结构检查补造。最多40事实/8问题/30比较。自动检查只支持有限明确句式，未识别会标待核：不能为凑格式改写原文或删掉关键事实。估计、计划必须单列其nature，过去估计也不是实绩；库存是时点，压榨量是区间流量，累计流量另标cumulative_flow。开机率等比率使用ratio；时点未执行合同使用commitment，不能当实物库存。metric/scope使用稳定指标/样本名，日期只放period。百分比的前后差额是百分点。比较只有同一来源明确声明同口径且保留完整支持原文时才可能自动计算；没有声明则列待核口径，不能补写“同口径”。question 字段与 missing 文字保持中性，直接答复写在 findings：所有报数留在facts并关联fact_ids，不能把预估改称计划，不能为消除提示删掉关键数据。不要在 JSON 外输出自由总结；不得作预测、交易判断、因果结论或全库缺失断言。原文报数的历史方向观察不等于预测，未证实的解释保持问题与待查资料。保留问题与证据关系，先查关键资料，缺口按已授权公开来源继续调查，不能为过格式校验而删除问题。若绑定了check_research_draft_v2工具，最终输出前提交完整草稿和本任务as_of，依据revise修订并回查source_review；在任务固定步骤预算内完成必要核查。若执行器提供 final_output_commit，按冻结策略将最新就绪草稿的已提交 operation_id 和原文 SHA-256 交给该工具；它必须是该轮唯一工具调用，不再复制或改写草稿为最终回答。未提供该工具的历史引擎，最终输出须逐字复制最后一次送检的 draft，不在送检后另改报数、日期、引用或解读；仍有待核项就明确保留，不伪称已核实。无法确认的项保留待核，不改原文、不删核心问题、不声称检查工具证明事实真实。`, asOf, asOf)
+quote 必须包含支持该报数的连续原文，最多2400字符，不能跨日期或样本借用其他数字。period_text逐字保留原文统计日期；没有明确年份或窗口时按 evidence 标注推断或未知，不为结构检查补造。最多40事实/20说明/8问题/30比较。自动检查只支持有限明确句式，未识别会标待核：不能为凑格式改写原文或删掉关键事实。估计、计划必须单列其nature，过去估计也不是实绩；库存是时点，压榨量是区间流量，累计流量另标cumulative_flow。开机率等比率使用ratio；时点未执行合同使用commitment，不能当实物库存。metric/scope使用稳定指标/样本名，日期只放period。百分比的前后差额是百分点。比较只有同一来源明确声明同口径且保留完整支持原文时才可能自动计算；没有声明则列待核口径，不能补写“同口径”。question 字段与 missing 文字保持中性，直接答复写在 findings：所有报数留在facts并关联fact_ids，不能把预估改称计划，不能为消除提示删掉关键数据。不要在 JSON 外输出自由总结；不得作预测、交易判断、因果结论或全库缺失断言。原文报数的历史方向观察不等于预测，未证实的解释保持问题与待查资料。保留问题与证据关系，先查关键资料，缺口按已授权公开来源继续调查，不能为过格式校验而删除问题。若绑定了check_research_draft_v2工具，最终输出前提交完整草稿和本任务as_of，依据revise修订并回查source_review；在任务固定步骤预算内完成必要核查。若执行器提供 final_output_commit，按冻结策略将最新就绪草稿的已提交 operation_id 和原文 SHA-256 交给该工具；它必须是该轮唯一工具调用，不再复制或改写草稿为最终回答。未提供该工具的历史引擎，最终输出须逐字复制最后一次送检的 draft，不在送检后另改报数、日期、引用或解读；仍有待核项就明确保留，不伪称已核实。无法确认的项保留待核，不改原文、不删核心问题、不声称检查工具证明事实真实。`, asOf, asOf)
 }

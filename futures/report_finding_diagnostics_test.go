@@ -29,7 +29,7 @@ func TestFindingDiagnosticsIdentifyTheExactBrokenReference(t *testing.T) {
 			}
 			before, _ := json.Marshal(q)
 			var issues []ReportIssue
-			checkFindings(q, "questions.q", map[string]ReportFact{"a": {ID: "a"}, "b": {ID: "b"}}, map[string]bool{"x": true, "y": true}, func(p, c, m string) {
+			checkFindings(q, "questions.q", map[string]ReportFact{"a": {ID: "a"}, "b": {ID: "b"}}, map[string]bool{"x": true, "y": true}, map[string]ReportStatement{}, func(p, c, m string) {
 				if c == "finding_reference" {
 					issues = append(issues, ReportIssue{Path: p, Code: c, Message: m})
 				}
@@ -53,7 +53,7 @@ func TestDraftCorrectionMustRepairTheReportedFinding(t *testing.T) {
 	}
 	for pass := 0; pass < 2; pass++ {
 		feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
-		if feedback.Validator != "futures-report-check-v7" || feedback.Status != "revision_required" || len(feedback.Revise) != 1 || feedback.Revise[0].Path != "questions.q1.findings[1].fact_ids[0]" {
+		if feedback.Validator != "futures-report-check-v8" || feedback.Status != "revision_required" || len(feedback.Revise) != 1 || feedback.Revise[0].Path != "questions.q1.findings[1].fact_ids[0]" {
 			t.Fatalf("wrong finding identified after unrelated edit: %+v", feedback)
 		}
 		// Editing an unrelated finding must not conceal the actual broken link.

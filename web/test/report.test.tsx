@@ -95,6 +95,7 @@ test("structured report preserves historical estimate labels and renders source 
   assert.doesNotMatch(html, /<script|<img|src="https:\/\/tracking|事实已核实/);
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /回查任务当时保存的资料/);
+  assert.doesNotMatch(html, /原文说明与来源边界/);
 });
 test("failed comparison never displays a calculated quantity or verified badge", () => {
   const check = report();
@@ -166,6 +167,79 @@ test("AI candidates and unknown periods remain readable without a fabricated cal
   assert.match(html, /href="#report-fact-f"/);
   assert.match(html, /回查任务当时保存的资料/);
   assert.doesNotMatch(html, /2026-09-01|<img|结构与留存引用检查一致/);
+});
+
+test("qualitative statements remain reviewable prose and reopen retained receipts", () => {
+  const check = report();
+  check.status = "needs_review";
+  check.report!.statements = [
+    {
+      id: "s1",
+      text: "该报数来自转载正文，样本明细未披露。",
+      document_id: "doc2",
+      quote: "本文转载自行业协会周报，样本明细未披露。",
+      content_kind: "ai_summary",
+      limitations: ["正文为转载，样本定义未披露。"],
+    },
+  ];
+  check.report!.questions[0].statement_ids = ["s1"];
+  check.report!.questions[0].findings = [
+    {
+      kind: "limitation",
+      text: "只能确认摘要这样表述，不能确认原始样本。",
+      fact_ids: [],
+      statement_ids: ["s1"],
+      comparison_ids: [],
+    },
+  ];
+  check.statements = [
+    {
+      id: "s1",
+      content_kind: "ai_summary",
+      quote_matched: true,
+      consistent: false,
+      operation_id: "task/read2",
+      version: "c".repeat(64),
+      quote_offset: 7,
+    },
+  ];
+  const html = renderToStaticMarkup(
+    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+  );
+  assert.match(html, /原文说明与来源边界/);
+  assert.match(html, /AI 摘要线索 · 未确认/);
+  assert.match(html, /只能确认摘要这样表述/);
+  assert.match(html, /href="#report-statement-s1"/);
+  assert.match(html, /回查任务当时保存的资料/);
+  assert.match(html, /引文匹配不等于解释、样本或范围已经验证/);
+  assert.doesNotMatch(html, /事实已核实|结构与留存引用检查一致/);
+});
+
+test("invalid statement IDs still show their issue on the statement card", () => {
+  const check = report();
+  check.status = "needs_review";
+  check.report!.statements = [
+    {
+      id: "../bad",
+      text: "来源说明。",
+      document_id: "doc2",
+      quote: "原文说明",
+      content_kind: "publisher_text",
+      limitations: [],
+    },
+  ];
+  check.statements = [];
+  check.issues = [
+    {
+      path: "statements[0]",
+      code: "identity",
+      message: "说明编号无效、重复或与事实编号冲突。",
+    },
+  ];
+  const html = renderToStaticMarkup(
+    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+  );
+  assert.match(html, /说明编号无效/);
 });
 
 test("invalid optional arrays cannot crash the report projection", () => {

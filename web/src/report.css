@@ -146,6 +146,27 @@
   display: grid;
   gap: 16px;
 }
+.report-statements {
+  margin-top: 26px;
+}
+.report-statements > p {
+  color: #6a7873;
+  font-size: 13px;
+}
+.report-statement-list {
+  display: grid;
+  gap: 16px;
+}
+.statement-card .statement-text {
+  margin: 12px 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.statement-card ul {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #6e5a35;
+}
 .fact-card {
   border: 1px solid #d5e2dc;
   border-radius: 14px;

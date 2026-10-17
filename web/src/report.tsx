@@ -58,6 +58,28 @@ type Fact = {
     limitations: string[];
   };
 };
+type Statement = {
+  id: string;
+  text: string;
+  document_id: string;
+  quote: string;
+  content_kind: string;
+  limitations: string[];
+};
+type StatementCheck = {
+  id: string;
+  content_kind: string;
+  quote_matched: boolean;
+  consistent: boolean;
+  operation_id?: string;
+  version?: string;
+  quote_offset: number;
+  original_hash?: string;
+  segments?: QuoteSegment[];
+  source_url?: string;
+  published_label?: string;
+  captured_label?: string;
+};
 export type ReportCheck = {
   status: string;
   notice: string;
@@ -71,16 +93,19 @@ export type ReportCheck = {
       id: string;
       question: string;
       fact_ids: string[];
+      statement_ids?: string[];
       comparison_ids: string[];
       missing: string[];
       findings?: {
         kind: string;
         text: string;
         fact_ids: string[];
+        statement_ids?: string[];
         comparison_ids: string[];
       }[];
     }[];
     facts: Fact[];
+    statements?: Statement[];
     comparisons: { id: string; current: string; baseline: string }[];
   };
   facts: {
@@ -97,6 +122,7 @@ export type ReportCheck = {
     published_label?: string;
     captured_label?: string;
   }[];
+  statements?: StatementCheck[];
   comparisons: {
     id: string;
     from: string;
@@ -201,6 +227,11 @@ export function CheckedReport({
                               依据 {id}
                             </a>
                           ))}
+                          {finding.statement_ids?.map((id) => (
+                            <a key={id} href={"#report-statement-" + id}>
+                              原文说明 {id}
+                            </a>
+                          ))}
                         </div>
                       </div>
                     ))}
@@ -210,6 +241,11 @@ export function CheckedReport({
                   {q.fact_ids.map((id) => (
                     <a key={id} href={"#report-fact-" + id}>
                       资料 {id}
+                    </a>
+                  ))}
+                  {q.statement_ids?.map((id) => (
+                    <a key={id} href={"#report-statement-" + id}>
+                      原文说明 {id}
                     </a>
                   ))}
                 </div>
@@ -363,6 +399,98 @@ export function CheckedReport({
               );
             })}
           </div>
+          {!!report.statements?.length && (
+            <section className="report-statements" aria-label="非数值原文说明">
+              <h3>原文说明与来源边界</h3>
+              <p>
+                以下内容用于来源性质、样本定义或正文覆盖范围，不是数值报数；引文匹配不等于解释、样本或范围已经验证。
+              </p>
+              <div className="report-statement-list">
+                {report.statements.map((s, n) => {
+                  const state =
+                    check.statements?.find((c) => c.id === s.id) ??
+                    check.statements?.[n];
+                  const issues = check.issues.filter(
+                    (i) =>
+                      i.path === "statements." + s.id ||
+                      i.path === "statements[" + n + "]",
+                  );
+                  return (
+                    <article
+                      id={"report-statement-" + s.id}
+                      key={s.id + ":" + n}
+                      className={
+                        "fact-card statement-card" +
+                        (state?.consistent ? "" : " needs-review")
+                      }
+                    >
+                      <div className="fact-kind">
+                        <span>
+                          原文说明 ·{" "}
+                          {evidenceKind[s.content_kind] || "性质待核"}
+                        </span>
+                        <span>
+                          {state?.consistent
+                            ? "引文与字段规则一致"
+                            : "待核，不作为已验证解释"}
+                        </span>
+                      </div>
+                      <p className="statement-text">{s.text}</p>
+                      {!!s.limitations?.length && (
+                        <>
+                          <b>来源限制（Agent 标注）</b>
+                          <ul>
+                            {s.limitations.map((note, i) => (
+                              <li key={i}>{note}</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                      {issues.map((i, k) => (
+                        <p className="fact-issue" key={k}>
+                          {i.message}
+                        </p>
+                      ))}
+                      <details>
+                        <summary>
+                          查看说明引用片段
+                          {state?.quote_matched
+                            ? " · 已匹配留存原文"
+                            : " · 尚未匹配"}
+                        </summary>
+                        <blockquote>{s.quote}</blockquote>
+                        {state?.quote_matched &&
+                          state.operation_id &&
+                          state.version && (
+                            <button
+                              className="source-citation"
+                              onClick={() =>
+                                onSource(s.document_id, {
+                                  operation_id: state.operation_id!,
+                                  version: state.version!,
+                                  quote_offset: state.quote_offset,
+                                  original_hash: state.original_hash,
+                                  segments: state.segments,
+                                  quote: s.quote,
+                                })
+                              }
+                            >
+                              回查任务当时保存的资料
+                            </button>
+                          )}
+                        {state?.operation_id && (
+                          <p className="receipt-label">
+                            阅读回执：{state.operation_id} · 第{" "}
+                            {(state.quote_offset ?? 0) + 1} 字符
+                          </p>
+                        )}
+                      </details>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           {!!report.comparisons.length && (
             <section className="report-comparisons">
               <h3>同口径对照</h3>

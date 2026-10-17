@@ -17,7 +17,7 @@ import (
 
 var researchTools = []contracts.Tool{{
 	Name:        "check_research_draft_v2",
-	Description: "检查期货研究草稿的字段、日期、比较口径和问题文字。传入完整 futures-evidence-v1 JSON 字符串及任务固定 as_of。structuredContent.ready 只表示结构允许交付，不证明引用真实、研究完整或事实正确。根据 revise 修订，source_review 需查原文，保留关键报数和未决问题。配置了原文交付策略时，用返回的已提交回执调用 final_output_commit，勿再次复制或改写送检稿。",
+	Description: "检查期货研究草稿的字段、日期、比较口径、问题文字和非数值原文说明。传入完整 futures-evidence-v1 JSON 字符串及任务固定 as_of。structuredContent.ready 只表示结构允许交付，不证明引用真实、研究完整或事实正确。根据 revise 修订，source_review 需查原文，保留关键报数和未决问题。配置了原文交付策略时，用返回的已提交回执调用 final_output_commit，勿再次复制或改写送检稿。",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"draft":{"type":"string","minLength":2,"maxLength":98304},"as_of":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}},"required":["draft","as_of"],"additionalProperties":false}`),
 }}
 
@@ -71,7 +71,7 @@ func reviewDraft(ctx context.Context, raw, asOf string) draftFeedback {
 			seen[issue.Code] = true
 		}
 		switch issue.Code {
-		case "anchor", "period_anchor", "estimate_anchor", "plan_anchor", "comparability", "retained_unchecked", "ai_summary", "evidence_unverified", "period_inferred", "period_unknown", "source_limitations", "finding_review":
+		case "anchor", "period_anchor", "estimate_anchor", "plan_anchor", "comparability", "retained_unchecked", "ai_summary", "evidence_unverified", "period_inferred", "period_unknown", "source_limitations", "finding_review", "statement_ai_summary", "statement_unverified", "statement_limitations", "statement_review":
 			out.SourceReview = append(out.SourceReview, item)
 		default:
 			out.Revise = append(out.Revise, item)

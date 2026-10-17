@@ -15,6 +15,7 @@ type ReportFinding struct {
 	Kind          string   `json:"kind"`
 	Text          string   `json:"text"`
 	FactIDs       []string `json:"fact_ids"`
+	StatementIDs  []string `json:"statement_ids,omitempty"`
 	ComparisonIDs []string `json:"comparison_ids"`
 }
 
@@ -63,21 +64,24 @@ func checkEvidence(f ReportFact, path string, add func(string, string, string)) 
 	}
 }
 
-func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, comparisons map[string]bool, add func(string, string, string)) {
+func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, comparisons map[string]bool, statements map[string]ReportStatement, add func(string, string, string)) {
 	if len(q.Findings) > 8 {
 		add(path, "finding_fields", "每个问题至多八项资料解读。")
 	}
-	questionFacts, questionComparisons := map[string]bool{}, map[string]bool{}
+	questionFacts, questionComparisons, questionStatements := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, id := range q.FactIDs {
 		questionFacts[id] = true
 	}
 	for _, id := range q.ComparisonIDs {
 		questionComparisons[id] = true
 	}
+	for _, id := range q.StatementIDs {
+		questionStatements[id] = true
+	}
 	for findingIndex, f := range q.Findings {
 		findingPath := fmt.Sprintf("%s.findings[%d]", path, findingIndex)
-		if (f.Kind != "observation" && f.Kind != "conflict" && f.Kind != "limitation") || !bounded(f.Text, 1200) || len(f.FactIDs) == 0 || len(f.FactIDs) > 40 || f.ComparisonIDs == nil || len(f.ComparisonIDs) > 30 {
-			add(findingPath, "finding_fields", "资料解读需有 observation/conflict/limitation 类型、有界文字和本问题的事实引用；comparison_ids 必须为数组。")
+		if (f.Kind != "observation" && f.Kind != "conflict" && f.Kind != "limitation") || !bounded(f.Text, 1200) || (len(f.FactIDs) == 0 && len(f.StatementIDs) == 0) || len(f.FactIDs) > 40 || len(f.StatementIDs) > 20 || f.ComparisonIDs == nil || len(f.ComparisonIDs) > 30 {
+			add(findingPath, "finding_fields", "资料解读需有 observation/conflict/limitation 类型、有界文字，以及本问题的事实或非数值说明引用；comparison_ids 必须为数组。")
 		}
 		seen := map[string]bool{}
 		for refIndex, id := range f.FactIDs {
@@ -91,6 +95,26 @@ func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, c
 				add(refPath, "finding_reference", "该位置的事实存在于 facts，但未列入所属问题的 fact_ids；核对支持关系后修正本问题的引用归属，不能仅删除相关证据换取通过。")
 			}
 			seen[id] = true
+		}
+		seen = map[string]bool{}
+		for refIndex, id := range f.StatementIDs {
+			refPath := fmt.Sprintf("%s.statement_ids[%d]", findingPath, refIndex)
+			switch {
+			case statements[id].ID == "":
+				add(refPath, "finding_reference", "该位置的非数值说明 ID 不存在于 statements；请核对实际支持这条解读的原文说明。")
+			case seen[id]:
+				add(refPath, "finding_reference", "该位置重复引用了本条解读中的同一说明；每条解读的 statement_ids 不得重复。")
+			case !questionStatements[id]:
+				add(refPath, "finding_reference", "该位置的说明存在于 statements，但未列入所属问题的 statement_ids；核对支持关系后修正本问题的引用归属。")
+			}
+			seen[id] = true
+		}
+		// A finding that leans on qualitative statements must not also carry a
+		// market quantity, even when an unrelated fact ID is attached. Numeric
+		// observations belong in a finding backed by facts alone, where the
+		// existing value/unit/period checks apply.
+		if len(f.StatementIDs) > 0 && numericClaim(f.Text) {
+			add(findingPath, "finding_quantity", "引用非数值说明的解读不能夹带市场数量（日期、页码、期数等非报数计数除外）；数值报数须在只引用 facts 的解读中表达并接受检查。")
 		}
 		seen = map[string]bool{}
 		for refIndex, id := range f.ComparisonIDs {
