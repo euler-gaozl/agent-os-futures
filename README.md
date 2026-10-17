@@ -30,7 +30,11 @@ BFF 只通过 HTTP 访问发布的期货 Agent 与本应用任务，不直接访
 
 此接口仅接受本服务的 `SERVICE_TOKEN`。需在 Registry 单独保存凭证，在 Runtime/ToolHub 配置精确主机与端口白名单，完成发现、检查、启用，再绑定固定版本 Agent。启动服务不会自动完成这些管理操作。旧任务保持原绑定，最终网页检查仍使用该任务的真实阅读回执。
 
-提交提示要求至多两次草稿检查，并逐字输出最后一次送检的草稿；这是 Agent 指令，尚不是执行器强制的最终稿一致性保证。未知日期、来源受限及资料解读进入 `source_review`，不能要求模型编造日期换取通过。草稿工具没有读取任务回执，也不证明来源真实。真实任务的报告质量仍未通过，见 [读取修复与研究记录](https://github.com/euler-gaozl/agent-os/blob/main/docs/research-read-acceptance-20261014.md)。
+2026-10-17 候选增加 `structuredContent`，协议 `futures-draft-readiness-v1`：`ready` 只代表草稿没有结构修订项，`scope` 固定 `structure_only`，`source_review_required` 始终为 true，`draft_sha256` 对应原始输入字符串。状态在反馈裁剪前判定，裁掉修订解释不能把失败变成就绪；完整旧文字反馈及历史草稿投影仍保留。
+
+管理员可为新 Agent 版本固定 `final_output`：`protocol=receipt-field-v1`、`tool=mcp_futures-research_check_research_draft_v2`、`input_field=draft`、`ready_path=["structuredContent","ready"]`。这里的工具名以实际绑定 MCP 名为准。需要 Registry/Runtime/Worker/Console 配套候选和受管发布；本仓的源码修改不自动启用此策略或改变已提交任务。
+
+新提交提示要求在固定步骤预算内核查；执行器提供 `final_output_commit` 时，引用已提交的最新就绪草稿回执结束，避免最终一步复制改稿。未提供该工具的历史引擎仍要求逐字复制；后者只是指令，不是执行器保证。未知日期、来源受限及资料解读进入 `source_review`，不能要求模型编造日期换取通过。草稿工具没有读取任务回执，也不证明来源真实。真实任务的报告质量仍未通过，见 [读取修复与研究记录](https://github.com/euler-gaozl/agent-os/blob/main/docs/research-read-acceptance-20261014.md)。
 
 `futures-evidence-v1` 增加可选 `facts[].evidence` 和 `questions[].findings`，当前检查器标识为 `futures-report-check-v6`；新读者保留旧报告兼容。旧版 BFF 会将包含这些字段的新报告显示为未结构化原文，因此回退后仍能读到完整结果，但不能声称新字段 UI 也兼容。此次没有修改 Runtime 的任务、原结果或数据库格式。
 
@@ -48,7 +52,7 @@ v5 保留 `format` 问题代码，提供有界的格式修订提示：JSON 语�
 
 ## 构建与部署
 
-需要 Go 1.27.2、Node 24.19.0、pnpm 11.25.0；固定 SDK rc.2 和 `vendor` 支持独立构建。
+需要 Go 1.27.2、Node 24.19.0、pnpm 11.25.0；固定 SDK rc.4 和 `vendor` 支持独立构建。
 
 ```powershell
 $env:GOWORK='off'; $env:GOPROXY='off'

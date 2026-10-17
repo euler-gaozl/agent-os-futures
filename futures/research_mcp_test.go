@@ -59,6 +59,32 @@ func TestResearchDraftFeedbackNeverClaimsRetainedVerification(t *testing.T) {
 	}
 }
 
+func TestDraftReadinessIsStructuralAndBoundToOriginalString(t *testing.T) {
+	r := exampleReport()
+	raw := encodeReport(t, r) + "\r\n  "
+	feedback := reviewDraft(context.Background(), raw, r.AsOf)
+	readiness := draftMCPResult(feedback)["structuredContent"].(map[string]any)
+	if readiness["protocol"] != "futures-draft-readiness-v1" || readiness["ready"] != true || readiness["scope"] != "structure_only" || readiness["source_review_required"] != true || readiness["draft_sha256"] != textHash(raw) {
+		t.Fatal("structure/source/original boundary lost", readiness)
+	}
+	for _, feedback := range []draftFeedback{
+		reviewDraft(context.Background(), `{"schema":"invalid"}`, r.AsOf),
+		{Phase: "draft_only", Status: "revision_required", Revise: []draftIssue{}, IssuesTruncated: true},
+		{Phase: "draft_only", Status: "source_review_required", Revise: []draftIssue{{Code: "schema"}}},
+		{},
+	} {
+		if draftMCPResult(feedback)["structuredContent"].(map[string]any)["ready"] != false {
+			t.Fatal("structural failure became ready")
+		}
+	}
+	// Omitted explanatory warnings do not pretend source review is complete.
+	feedback.IssuesTruncated = true
+	readiness = draftMCPResult(feedback)["structuredContent"].(map[string]any)
+	if readiness["ready"] != true || readiness["source_review_required"] != true {
+		t.Fatal("source warning changed structural contract")
+	}
+}
+
 func TestResearchMCPServiceAuthProtocolAndNoOutboundAccess(t *testing.T) {
 	calls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
@@ -106,6 +132,23 @@ func TestResearchMCPServiceAuthProtocolAndNoOutboundAccess(t *testing.T) {
 	w := request("POST", "/mcp/research", service, string(body))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "source_review_required") || strings.Contains(w.Body.String(), `"error"`) {
 		t.Fatal(w.Body.String())
+	}
+	var response struct {
+		Result struct {
+			StructuredContent struct {
+				Ready        bool   `json:"ready"`
+				SourceReview bool   `json:"source_review_required"`
+				Scope        string `json:"scope"`
+				DraftSHA256  string `json:"draft_sha256"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	ready := response.Result.StructuredContent
+	if !ready.Ready || !ready.SourceReview || ready.Scope != "structure_only" || ready.DraftSHA256 != textHash(encodeReport(t, r)) {
+		t.Fatal("MCP wire lost structural/original/source boundaries", ready)
 	}
 	for _, bad := range []string{
 		strings.Replace(string(body), `"as_of":"2026-10-09"`, `"as_of":"2026-10-09","run_id":"foreign"`, 1),

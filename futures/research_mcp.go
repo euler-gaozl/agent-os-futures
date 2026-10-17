@@ -17,7 +17,7 @@ import (
 
 var researchTools = []contracts.Tool{{
 	Name:        "check_research_draft_v2",
-	Description: "检查期货研究草稿的字段、日期、比较口径和问题文字。传入完整 futures-evidence-v1 JSON 字符串及任务固定 as_of。不会读取任务原文，结果不能证明引用真实或研究完成。根据 revise 修订，source_review 需查原文；最多两轮修订，保留关键报数和未决问题。",
+	Description: "检查期货研究草稿的字段、日期、比较口径和问题文字。传入完整 futures-evidence-v1 JSON 字符串及任务固定 as_of。structuredContent.ready 只表示结构允许交付，不证明引用真实、研究完整或事实正确。根据 revise 修订，source_review 需查原文，保留关键报数和未决问题。配置了原文交付策略时，用返回的已提交回执调用 final_output_commit，勿再次复制或改写送检稿。",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"draft":{"type":"string","minLength":2,"maxLength":98304},"as_of":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}},"required":["draft","as_of"],"additionalProperties":false}`),
 }}
 
@@ -43,7 +43,11 @@ type draftIssue struct {
 
 func draftMCPResult(feedback draftFeedback) map[string]any {
 	body, _ := json.Marshal(feedback)
-	return map[string]any{"content": []map[string]string{{"type": "text", "text": string(body)}}, "isError": false}
+	// Status is classified BEFORE bounded feedback truncation. Never infer
+	// readiness from an emptied/truncated revise list, or from source warnings.
+	return map[string]any{"content": []map[string]string{{"type": "text", "text": string(body)}}, "isError": false,
+		"structuredContent": map[string]any{"protocol": "futures-draft-readiness-v1", "ready": feedback.Phase == "draft_only" && feedback.Status == "source_review_required" && len(feedback.Revise) == 0,
+			"scope": "structure_only", "source_review_required": true, "draft_sha256": feedback.DraftSHA256}}
 }
 
 func reviewDraft(ctx context.Context, raw, asOf string) draftFeedback {

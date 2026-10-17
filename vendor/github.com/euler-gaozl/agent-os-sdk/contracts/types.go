@@ -21,12 +21,13 @@ type Ref struct {
 	Revision int    `json:"revision"`
 }
 type ModelConfig struct {
-	Thinking        string `json:"thinking,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	MaxTokens       int    `json:"max_tokens,omitempty"`
-	BaseURL         string `json:"base_url"`
-	Model           string `json:"model"`
-	KeyEnv          string `json:"key_env"`
+	Limits          *ModelLimits `json:"limits,omitempty"`
+	Thinking        string       `json:"thinking,omitempty"`
+	ReasoningEffort string       `json:"reasoning_effort,omitempty"`
+	MaxTokens       int          `json:"max_tokens,omitempty"`
+	BaseURL         string       `json:"base_url"`
+	Model           string       `json:"model"`
+	KeyEnv          string       `json:"key_env"`
 }
 type Tool struct {
 	Name        string          `json:"name"`
@@ -48,23 +49,24 @@ type Skill struct {
 	Files   []string `json:"files,omitempty"`
 }
 type Agent struct {
-	MaxModelAttempts int         `json:"max_model_attempts,omitempty"`
-	ModelTokenBudget int         `json:"model_token_budget,omitempty"`
-	ContextTokens    int         `json:"context_tokens"`
-	Constraints      []string    `json:"constraints,omitempty"`
-	Publication      Publication `json:"publication"`
-	Name             string      `json:"name"`
-	Prompt           string      `json:"prompt"`
-	Prompts          []Ref       `json:"prompts"`
-	Skills           []Ref       `json:"skills"`
-	Connectors       []Ref       `json:"connectors"`
-	Tools            []string    `json:"tools"`
-	Model            ModelConfig `json:"model"`
-	MaxSteps         int         `json:"max_steps"`
-	ContextBytes     int         `json:"context_bytes"`
-	MaxChildren      int         `json:"max_children"`
-	ChildAgents      []Ref       `json:"child_agents"`
-	Knowledge        []Ref       `json:"knowledge"`
+	FinalOutput      *FinalOutputPolicy `json:"final_output,omitempty"`
+	MaxModelAttempts int                `json:"max_model_attempts,omitempty"`
+	ModelTokenBudget int                `json:"model_token_budget,omitempty"`
+	ContextTokens    int                `json:"context_tokens"`
+	Constraints      []string           `json:"constraints,omitempty"`
+	Publication      Publication        `json:"publication"`
+	Name             string             `json:"name"`
+	Prompt           string             `json:"prompt"`
+	Prompts          []Ref              `json:"prompts"`
+	Skills           []Ref              `json:"skills"`
+	Connectors       []Ref              `json:"connectors"`
+	Tools            []string           `json:"tools"`
+	Model            ModelConfig        `json:"model"`
+	MaxSteps         int                `json:"max_steps"`
+	ContextBytes     int                `json:"context_bytes"`
+	MaxChildren      int                `json:"max_children"`
+	ChildAgents      []Ref              `json:"child_agents"`
+	Knowledge        []Ref              `json:"knowledge"`
 }
 type Snapshot struct {
 	Agent      Agent                    `json:"agent"`
@@ -176,11 +178,25 @@ func Has(values []string, s string) bool {
 	return false
 }
 func (a *Agent) Validate() error {
-	if a.ContextTokens == 0 {
-		a.ContextTokens = 32000
+	if a.FinalOutput != nil {
+		if err := a.FinalOutput.Validate(); err != nil {
+			return err
+		}
+		if a.Model.Limits == nil {
+			return errors.New("receipt final output requires native model capabilities")
+		}
 	}
-	if a.ContextTokens < 8192 || a.ContextTokens > 1000000 {
-		return errors.New("context_tokens outside 8192..1000000")
+	if a.Model.Limits != nil {
+		if e := a.Model.Limits.Validate(a.ContextTokens, a.Model); e != nil {
+			return e
+		}
+	} else {
+		if a.ContextTokens == 0 {
+			a.ContextTokens = 32000
+		}
+		if a.ContextTokens < 8192 || a.ContextTokens > 1000000 {
+			return errors.New("context_tokens outside 8192..1000000")
+		}
 	}
 	if e := a.Publication.Validate(); e != nil {
 		return e
@@ -194,7 +210,7 @@ func (a *Agent) Validate() error {
 	if a.ContextBytes == 0 {
 		a.ContextBytes = 64000
 	}
-	if a.MaxSteps < 1 || a.MaxSteps > 100 || a.ContextBytes < 4096 || a.ContextBytes > 1000000 || a.MaxChildren < 0 || a.MaxChildren > 8 {
+	if a.MaxSteps < 1 || a.MaxSteps > 100 || (a.Model.Limits == nil && (a.ContextBytes < 4096 || a.ContextBytes > 1000000)) || a.MaxChildren < 0 || a.MaxChildren > 8 {
 		return errors.New("agent budget outside permitted range")
 	}
 	if a.MaxModelAttempts < 0 || a.MaxModelAttempts > 500 || a.ModelTokenBudget < 0 || a.ModelTokenBudget > 10000000 {
@@ -203,13 +219,13 @@ func (a *Agent) Validate() error {
 	if a.Model.Model == "" || a.Model.BaseURL == "" {
 		return errors.New("model and base_url required")
 	}
-	if a.Model.MaxTokens < 0 || a.Model.MaxTokens > 32768 {
+	if a.Model.Limits == nil && (a.Model.MaxTokens < 0 || a.Model.MaxTokens > 32768) {
 		return errors.New("model max_tokens outside 0..32768")
 	}
 	if !Has([]string{"", "enabled", "disabled"}, a.Model.Thinking) || !Has([]string{"", "low", "high", "max"}, a.Model.ReasoningEffort) || (a.Model.Thinking == "disabled" && a.Model.ReasoningEffort != "") {
 		return errors.New("invalid model thinking mode or effort")
 	}
-	if len(a.Prompt) > a.ContextBytes/2 {
+	if a.Model.Limits == nil && len(a.Prompt) > a.ContextBytes/2 {
 		return errors.New("prompt exceeds pinned context budget")
 	}
 	for _, r := range append(append(append([]Ref{}, a.Prompts...), a.Skills...), a.Connectors...) {
