@@ -34,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Routes(mux *http.ServeMux) {
 	s.reportRoute(mux)
 	s.draftRoutes(mux)
+	s.draftMatchRoute(mux)
 	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
 		webproxy.Proxy(w, r, s.Client.RegistryURL+"/v1/published/futures", s.Client.Token)
 	})

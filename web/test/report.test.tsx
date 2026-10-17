@@ -2,7 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CheckedReport, type ReportCheck } from "../src/report";
+import {
+  CheckedReport,
+  DraftMatchNotice,
+  type ReportCheck,
+} from "../src/report";
+
+test("final draft notice separates changed, missing and matched evidence", () => {
+  const changed = renderToStaticMarkup(
+    <DraftMatchNotice match={{ status: "changed" }} />,
+  );
+  assert.match(changed, /role="alert"/);
+  assert.match(changed, /最终回答在最后送检后被改动/);
+  const unavailable = renderToStaticMarkup(
+    <DraftMatchNotice match={{ status: "unavailable" }} />,
+  );
+  assert.match(unavailable, /暂时无法核对/);
+  assert.doesNotMatch(unavailable, /未找到留存/);
+  const matched = renderToStaticMarkup(
+    <DraftMatchNotice match={{ status: "matched" }} />,
+  );
+  assert.match(matched, /逐字一致/);
+  assert.match(matched, /内容与来源仍须分别核对/);
+});
 
 function report(): ReportCheck {
   return {

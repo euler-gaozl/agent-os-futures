@@ -8,6 +8,28 @@ export type SourceProof = {
   quote: string;
 };
 export type OpenSource = (id: string, proof?: SourceProof) => void;
+export type DraftMatch = {
+  status: "matched" | "changed" | "not_found" | "unavailable" | "not_final";
+};
+export function DraftMatchNotice({ match }: { match: DraftMatch }) {
+  const messages: Record<DraftMatch["status"], string> = {
+    matched: "最终回答与最后送检稿逐字一致。内容与来源仍须分别核对。",
+    changed:
+      "最终回答在最后送检后被改动。先前的草稿检查不能代表这份回答；下方保留送检稿与检查反馈，可对照复核。",
+    not_found: "本任务未找到留存的送检稿，无法核对最终回答是否经过草稿检查。",
+    unavailable:
+      "暂时无法核对最终回答与最后送检稿是否一致。原回答保持显示，不视为已经通过。",
+    not_final: "任务尚无完成状态的最终回答，留存草稿不能视为最终交付。",
+  };
+  return (
+    <p
+      className="draft-match-notice"
+      role={match.status === "changed" ? "alert" : "status"}
+    >
+      {messages[match.status] ?? messages.unavailable}
+    </p>
+  );
+}
 
 type Fact = {
   id: string;
@@ -380,11 +402,13 @@ export function ReportReview({
   onSource: OpenSource;
 }) {
   const [check, setCheck] = useState<ReportCheck | null>(null),
+    [draftMatch, setDraftMatch] = useState<DraftMatch | null>(null),
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
     setCheck(null);
+    setDraftMatch(null);
     setError("");
     api<ReportCheck>("/tasks/" + encodeURIComponent(task) + "/report-check")
       .then((v) => {
@@ -393,6 +417,13 @@ export function ReportReview({
       .catch((e) => {
         if (live) setError(e.message);
       });
+    api<DraftMatch>("/tasks/" + encodeURIComponent(task) + "/draft-match")
+      .then((v) => {
+        if (live) setDraftMatch(v);
+      })
+      .catch(() => {
+        if (live) setDraftMatch({ status: "unavailable" });
+      });
     return () => {
       live = false;
     };
@@ -400,6 +431,7 @@ export function ReportReview({
   if (error)
     return (
       <>
+        {draftMatch && <DraftMatchNotice match={draftMatch} />}
         <p className="source-error" role="alert">
           资料核对服务暂不可用：{error}{" "}
           <button
@@ -418,5 +450,15 @@ export function ReportReview({
         <Spinner /> 正在核对结构、时间与本次留存引用…
       </p>
     );
-  return <CheckedReport check={check} raw={raw} onSource={onSource} />;
+  return (
+    <>
+      {draftMatch && <DraftMatchNotice match={draftMatch} />}
+      {draftMatch?.status === "unavailable" && (
+        <button className="text-button" onClick={() => setAttempt((n) => n + 1)}>
+          重新核对送检稿
+        </button>
+      )}
+      <CheckedReport check={check} raw={raw} onSource={onSource} />
+    </>
+  );
 }
