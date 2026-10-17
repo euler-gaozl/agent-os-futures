@@ -7,6 +7,7 @@ export type Evidence = {
   operation_id: string;
   run_id: string;
   document_id: string;
+  original_hash?: string;
   title: string;
   source: string;
   kind: string;
@@ -25,6 +26,7 @@ export type Part = Evidence & {
   next_offset: number | null;
   version: string;
 };
+export type LoadedSource = Part & { quote_parts?: Part[] };
 
 // Open the exact immutable receipt used by the fact check, including a quote
 // beyond its first page. Offsets from the backend count Unicode code points.
@@ -33,7 +35,7 @@ export async function loadSourceQuote(
   document: string,
   proof: SourceProof,
   read = api<Part>,
-): Promise<Part> {
+): Promise<LoadedSource> {
   if (
     !proof.operation_id ||
     !/^[a-f0-9]{64}$/.test(proof.version) ||
@@ -43,6 +45,72 @@ export async function loadSourceQuote(
     Array.from(proof.quote).length > 2400
   )
     throw new Error("引用定位信息无效。");
+  if (proof.segments !== undefined) {
+    const segments = proof.segments,
+      quote = Array.from(proof.quote);
+    if (
+      !/^[a-f0-9]{64}$/.test(proof.original_hash || "") ||
+      !Array.isArray(segments) ||
+      segments.length < 2 ||
+      segments.length > 8 ||
+      segments[0].operation_id !== proof.operation_id ||
+      segments[0].version !== proof.version
+    )
+      throw new Error("跨片段引用缺少一致的原文版本。");
+    let position = proof.quote_offset;
+    const seen = new Set<string>();
+    for (const [i, s] of segments.entries()) {
+      if (
+        !s.operation_id ||
+        s.operation_id.length > 512 ||
+        seen.has(s.operation_id) ||
+        !/^[a-f0-9]{64}$/.test(s.version) ||
+        ![s.read_offset, s.read_end, s.quote_offset, s.quote_end].every(
+          Number.isSafeInteger,
+        ) ||
+        s.read_offset < 0 ||
+        s.read_end > 2147483646 ||
+        s.read_end <= s.read_offset ||
+        s.quote_offset !== position ||
+        s.quote_offset < s.read_offset ||
+        s.quote_end > s.read_end ||
+        s.quote_end <= s.quote_offset ||
+        (i > 0 && segments[i - 1].read_end !== s.read_offset)
+      )
+        throw new Error("跨片段引用的阅读范围不连续。");
+      position = s.quote_end;
+      seen.add(s.operation_id);
+    }
+    if (position !== proof.quote_offset + quote.length)
+      throw new Error("跨片段引用长度不一致。");
+    const parts: Part[] = [];
+    for (const s of segments) {
+      const part = await loadSourceQuote(
+        base,
+        document,
+        {
+          operation_id: s.operation_id,
+          version: s.version,
+          quote_offset: s.quote_offset,
+          quote: quote
+            .slice(
+              s.quote_offset - proof.quote_offset,
+              s.quote_end - proof.quote_offset,
+            )
+            .join(""),
+        },
+        read,
+      );
+      if (
+        part.original_hash !== proof.original_hash ||
+        part.read_offset !== s.read_offset ||
+        part.read_end !== s.read_end
+      )
+        throw new Error("跨片段引用的原文版本或阅读范围已变化。");
+      parts.push(part);
+    }
+    return { ...parts[0], quote_parts: parts };
+  }
   const path =
     base +
     "/record?operation_id=" +
@@ -88,7 +156,13 @@ export async function loadSourceQuote(
   return part;
 }
 
-function SourceText({ part, proof }: { part: Part; proof?: SourceProof }) {
+function SourceText({
+  part,
+  proof,
+}: {
+  part: LoadedSource;
+  proof?: SourceProof;
+}) {
   const highlight = useRef<HTMLElement>(null);
   useEffect(() => {
     highlight.current?.scrollIntoView({ block: "center" });
@@ -96,6 +170,38 @@ function SourceText({ part, proof }: { part: Part; proof?: SourceProof }) {
   const text = Array.from(part.text),
     start = proof ? proof.quote_offset - part.read_offset - part.offset : -1;
   const size = proof ? Array.from(proof.quote).length : 0;
+  if (part.quote_parts && proof?.segments)
+    return (
+      <>
+        <p className="source-description">
+          引用跨 {part.quote_parts.length} 份已保存阅读片段，按原文顺序展示。
+        </p>
+        {part.quote_parts.map((p, i) => {
+          const s = proof.segments![i];
+          return (
+            <section key={p.operation_id} aria-label={`引用片段 ${i + 1}`}>
+              <h4>
+                片段 {i + 1} · 原文第 {s.quote_offset + 1}–{s.quote_end} 个字符
+              </h4>
+              <SourceText
+                part={p}
+                proof={{
+                  operation_id: s.operation_id,
+                  version: s.version,
+                  quote_offset: s.quote_offset,
+                  quote: Array.from(proof.quote)
+                    .slice(
+                      s.quote_offset - proof.quote_offset,
+                      s.quote_end - proof.quote_offset,
+                    )
+                    .join(""),
+                }}
+              />
+            </section>
+          );
+        })}
+      </>
+    );
   if (
     !proof ||
     start < 0 ||
@@ -164,7 +270,7 @@ export function SourceDialog({
   const [records, setRecords] = useState<Evidence[]>([]),
     [cursor, setCursor] = useState("");
   const [selected, setSelected] = useState(proof?.operation_id || ""),
-    [part, setPart] = useState<Part | null>(null);
+    [part, setPart] = useState<LoadedSource | null>(null);
   const [pinned, setPinned] = useState(!!proof);
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -315,8 +421,9 @@ export function SourceDialog({
               )}
               <dt>本次阅读位置</dt>
               <dd>
-                第 {record.read_offset + 1}–{record.read_end} 个字符
-                {record.has_more
+                第 {record.read_offset + 1}–
+                {part?.quote_parts?.at(-1)?.read_end ?? record.read_end} 个字符
+                {(part?.quote_parts?.at(-1) ?? record).has_more
                   ? " · 此次读取后原文还有内容"
                   : " · 已读到该文档末尾"}
               </dd>
@@ -374,13 +481,13 @@ export function SourceDialog({
             已锁定引用的阅读回执与版本 · 第 {proof.quote_offset + 1} 个字符
           </p>
         )}
-        {part && proof && pinned && part.offset > 0 && (
+        {part && !part.quote_parts && proof && pinned && part.offset > 0 && (
           <button className="text-button" onClick={() => setPinned(false)}>
             从此片段开头阅读
           </button>
         )}
         {part && <SourceText part={part} proof={proof} />}
-        {part?.next_offset !== null && part && (
+        {part?.next_offset !== null && part && !part.quote_parts && (
           <button
             className="button"
             disabled={busy}
@@ -393,6 +500,16 @@ export function SourceDialog({
           <details className="source-details">
             <summary>来源定位信息</summary>
             <p>文档标识：{record.document_id}</p>
+            {part?.quote_parts && (
+              <>
+                <p>原文版本：{proof?.original_hash}</p>
+                {part.quote_parts.map((p) => (
+                  <p key={p.operation_id}>
+                    阅读回执：{p.operation_id} · 版本：{p.version}
+                  </p>
+                ))}
+              </>
+            )}
             <p>
               阅读时间：{new Date(record.recorded_at).toLocaleString("zh-CN")}
             </p>

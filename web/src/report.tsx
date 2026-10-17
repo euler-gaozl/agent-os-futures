@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { api, Spinner } from "./shared";
 import { Answer } from "./markdown";
+export type QuoteSegment = {
+  operation_id: string;
+  version: string;
+  read_offset: number;
+  read_end: number;
+  quote_offset: number;
+  quote_end: number;
+};
 export type SourceProof = {
   operation_id: string;
   version: string;
   quote_offset: number;
   quote: string;
+  original_hash?: string;
+  segments?: QuoteSegment[];
 };
 export type OpenSource = (id: string, proof?: SourceProof) => void;
 export type DraftMatch = {
@@ -81,6 +91,8 @@ export type ReportCheck = {
     operation_id?: string;
     version?: string;
     quote_offset: number;
+    original_hash?: string;
+    segments?: QuoteSegment[];
     source_url?: string;
     published_label?: string;
     captured_label?: string;
@@ -331,6 +343,8 @@ export function CheckedReport({
                               operation_id: state.operation_id!,
                               version: state.version!,
                               quote_offset: state.quote_offset,
+                              original_hash: state.original_hash,
+                              segments: state.segments,
                               quote: f.source.quote,
                             })
                           }
@@ -454,7 +468,10 @@ export function ReportReview({
     <>
       {draftMatch && <DraftMatchNotice match={draftMatch} />}
       {draftMatch?.status === "unavailable" && (
-        <button className="text-button" onClick={() => setAttempt((n) => n + 1)}>
+        <button
+          className="text-button"
+          onClick={() => setAttempt((n) => n + 1)}
+        >
           重新核对送检稿
         </button>
       )}

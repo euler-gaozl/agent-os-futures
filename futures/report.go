@@ -73,16 +73,18 @@ type ReportIssue struct {
 	Message string `json:"message"`
 }
 type FactCheck struct {
-	ID             string `json:"id"`
-	Group          string `json:"group"`
-	QuoteMatched   bool   `json:"quote_matched"`
-	OperationID    string `json:"operation_id,omitempty"`
-	Version        string `json:"version,omitempty"`
-	QuoteOffset    int    `json:"quote_offset"`
-	SourceURL      string `json:"source_url,omitempty"`
-	PublishedLabel string `json:"published_label,omitempty"`
-	CapturedLabel  string `json:"captured_label,omitempty"`
-	Consistent     bool   `json:"consistent"`
+	ID             string         `json:"id"`
+	Group          string         `json:"group"`
+	QuoteMatched   bool           `json:"quote_matched"`
+	OperationID    string         `json:"operation_id,omitempty"`
+	Version        string         `json:"version,omitempty"`
+	QuoteOffset    int            `json:"quote_offset"`
+	OriginalHash   string         `json:"original_hash,omitempty"`
+	Segments       []QuoteSegment `json:"segments,omitempty"`
+	SourceURL      string         `json:"source_url,omitempty"`
+	PublishedLabel string         `json:"published_label,omitempty"`
+	CapturedLabel  string         `json:"captured_label,omitempty"`
+	Consistent     bool           `json:"consistent"`
 }
 type ComparisonCheck struct {
 	ID         string `json:"id"`
@@ -106,6 +108,7 @@ type ReportCheck struct {
 type retainedPart struct {
 	OperationID     string `json:"operation_id"`
 	DocumentID      string `json:"document_id"`
+	OriginalHash    string `json:"original_hash"`
 	Text            string `json:"text"`
 	Offset          int    `json:"offset"`
 	NextOffset      *int   `json:"next_offset"`
@@ -119,6 +122,8 @@ type quoteProof struct {
 	Operation, Version             string
 	Offset                         int
 	SourceURL, Published, Captured string
+	OriginalHash                   string
+	Segments                       []QuoteSegment
 }
 type quoteReader func(context.Context, ReportSource) (quoteProof, error)
 
@@ -365,7 +370,7 @@ func comparableExpressions(current, baseline ReportFact) bool {
 }
 func checkReport(ctx context.Context, raw, asOf string, read quoteReader) ReportCheck {
 	digest := sha256.Sum256([]byte(raw))
-	out := ReportCheck{Validator: "futures-report-check-v5", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
+	out := ReportCheck{Validator: "futures-report-check-v6", ResultSHA256: hex.EncodeToString(digest[:]), ClassificationDate: asOf, Status: "needs_review", Notice: "基准日用于过去/未来分类，不代表当日已知信息。检查仅覆盖所支持的结构、时间表达、算术及留存引用；不证明来源真实性、完整性、样本稳定或独立交叉核验。来源性质、日期推断和资料解读由 Agent 标注，须结合原文复核。", Facts: []FactCheck{}, Comparisons: []ComparisonCheck{}, Issues: []ReportIssue{}}
 	add := func(path, code, msg string) { out.Issues = append(out.Issues, ReportIssue{path, code, msg}) }
 	report, e := parseReport(raw)
 	if e != nil {
@@ -460,6 +465,7 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 					check.OperationID = proof.Operation
 					check.Version = proof.Version
 					check.QuoteOffset = proof.Offset
+					check.OriginalHash, check.Segments = proof.OriginalHash, proof.Segments
 					check.SourceURL, check.PublishedLabel, check.CapturedLabel = proof.SourceURL, proof.Published, proof.Captured
 				}
 			}
@@ -589,6 +595,9 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 		if e := r.request(ctx, "/evidence?document_id="+url.QueryEscape(source.DocumentID)+"&limit=8", &list); e != nil {
 			return quoteProof{}, e
 		}
+		if len(list.Items) > 8 {
+			return quoteProof{}, errors.New("receipt list limit")
+		}
 		for _, item := range list.Items {
 			if item.DocumentID != source.DocumentID || item.OperationID == "" || len(item.OperationID) > 512 {
 				return quoteProof{}, errors.New("receipt identity mismatch")
@@ -606,6 +615,9 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 				}
 				if part.OperationID != item.OperationID || part.DocumentID != source.DocumentID || part.Offset != offset || !receiptHash.MatchString(part.Version) || (version != "" && version != part.Version) || utf8.RuneCountInString(part.Text) > 8192 || part.ReadOffset < 0 || part.ReadEnd < part.ReadOffset || (offset > 0 && (part.ReadOffset != joined.ReadOffset || part.ReadEnd != joined.ReadEnd)) {
 					return quoteProof{}, errors.New("receipt segment mismatch")
+				}
+				if offset > 0 && part.OriginalHash != joined.OriginalHash {
+					return quoteProof{}, errors.New("receipt original version mismatch")
 				}
 				r.bytes += len(part.Text)
 				if r.bytes > 256<<10 {
@@ -664,6 +676,9 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 			}
 			return proof, nil
 		}
+	}
+	if proof, ok := joinedQuote(parts, source); ok {
+		return proof, nil
 	}
 	return quoteProof{}, errors.New("quote not found within loaded retained receipts")
 }
