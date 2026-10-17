@@ -807,3 +807,7 @@ body {
     font-size: 19px;
   }
 }
+
+.related-tasks { margin: 0 0 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.related-tasks small { display: block; margin-bottom: 6px; color: var(--muted); }
+.related-tasks .button-row { flex-wrap: wrap; gap: 8px; }

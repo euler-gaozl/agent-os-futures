@@ -515,6 +515,35 @@ function Futures() {
                     <span>{date(result.created_at)}</span>
                   </div>
                 </header>
+                {(() => {
+                  const related = (tasks || [])
+                    .filter(
+                      (item) =>
+                        item.id !== result.id &&
+                        item.commodity === result.commodity &&
+                        item.status === "completed",
+                    )
+                    .slice(0, 3);
+                  if (!related.length) return null;
+                  return (
+                    <div className="related-tasks">
+                      <small>
+                        同品种历史任务（人工核对，不是自动证据链）
+                      </small>
+                      <div className="button-row">
+                        {related.map((item) => (
+                          <button
+                            key={item.id}
+                            className="text-button"
+                            onClick={() => setSelected(item.id)}
+                          >
+                            {date(item.created_at)} · {item.id.slice(0, 8)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="research-progress">
                   <div>
                     <span className="progress-number">1</span>
