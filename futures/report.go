@@ -128,8 +128,38 @@ type quoteProof struct {
 	SourceURL, Published, Captured string
 	OriginalHash                   string
 	Segments                       []QuoteSegment
+	MatchMode                      string
 }
 type quoteReader func(context.Context, ReportSource) (quoteProof, error)
+
+func normalizedQuoteIndex(text, quote string) (int, bool) {
+	var normalized []rune
+	var positions []int
+	for i, r := range []rune(text) {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		normalized = append(normalized, r)
+		positions = append(positions, i)
+	}
+	target := []rune(strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, quote))
+	if len(target) == 0 || len(target) > len(normalized) {
+		return 0, false
+	}
+	for start := 0; start+len(target) <= len(normalized); start++ {
+		if string(normalized[start:start+len(target)]) == string(target) {
+			return positions[start], true
+		}
+	}
+	return 0, false
+}
+
+var errReceiptBudget = errors.New("receipt lookup budget exhausted")
 
 var reportID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$`)
 var receiptHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -524,7 +554,11 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 			if read != nil {
 				proof, err := read(ctx, f.Source)
 				if err != nil {
-					add(path, "retained_quote", "未能在本任务有界留存资料中逐字确认该引用；可能是原文不符、未读取、超限或服务不可用。")
+					if errors.Is(err, errReceiptBudget) {
+						add(path, "receipt_budget", "本任务继承回执过多，检查预算在确认这条引用前耗尽；应复用未变化的原文，不能据此断言引文错误。")
+					} else {
+						add(path, "retained_quote", "未能在本任务有界留存资料中逐字确认该引用；可能是原文不符、未读取、超限或服务不可用。")
+					}
 				} else {
 					check.QuoteMatched = true
 					check.OperationID = proof.Operation
@@ -532,6 +566,9 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 					check.QuoteOffset = proof.Offset
 					check.OriginalHash, check.Segments = proof.OriginalHash, proof.Segments
 					check.SourceURL, check.PublishedLabel, check.CapturedLabel = proof.SourceURL, proof.Published, proof.Captured
+					if proof.MatchMode == "whitespace" {
+						add(path, "quote_normalized", "引用与原文仅在空白字符上不同；已按空白归一化定位并保留原文偏移，需人工确认不是跨词拼接。")
+					}
 				}
 			}
 		}
@@ -584,7 +621,11 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 		} else if read != nil {
 			proof, err := read(ctx, ReportSource{DocumentID: s.DocumentID, Quote: s.Quote})
 			if err != nil {
-				add(path, "retained_statement_quote", "未能在本任务有界留存资料中逐字确认该说明的引用；可能是原文不符、未读取、超限或服务不可用。")
+				if errors.Is(err, errReceiptBudget) {
+					add(path, "receipt_budget", "本任务继承回执过多，检查预算在确认这条说明前耗尽；应复用未变化的原文，不能据此断言引文错误。")
+				} else {
+					add(path, "retained_statement_quote", "未能在本任务有界留存资料中逐字确认该说明的引用；可能是原文不符、未读取、超限或服务不可用。")
+				}
 			} else {
 				check.QuoteMatched = true
 				check.OperationID = proof.Operation
@@ -592,6 +633,9 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 				check.QuoteOffset = proof.Offset
 				check.OriginalHash, check.Segments = proof.OriginalHash, proof.Segments
 				check.SourceURL, check.PublishedLabel, check.CapturedLabel = proof.SourceURL, proof.Published, proof.Captured
+				if proof.MatchMode == "whitespace" {
+					add(path, "quote_normalized", "说明引用与原文仅在空白字符上不同；已按空白归一化定位并保留原文偏移，需人工确认不是跨词拼接。")
+				}
 			}
 		}
 		if statementClaim.MatchString(s.Text) && unsupportedStatementClaim(s.Text, s.Quote) {
@@ -723,13 +767,14 @@ type reportEvidenceReader struct {
 func (r *reportEvidenceReader) request(ctx context.Context, uri string, out any) error {
 	r.requests++
 	if r.requests > 48 {
-		return errors.New("receipt lookup limit")
+		return errReceiptBudget
 	}
 	return r.server.Client.Request(ctx, "GET", r.base+uri, nil, out)
 }
 func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (quoteProof, error) {
 	parts, known := r.cache[source.DocumentID]
 	if !known {
+		seenRanges := map[string]bool{}
 		var list struct {
 			Items []retainedPart `json:"items"`
 			Next  string         `json:"next_cursor"`
@@ -744,6 +789,11 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 			if item.DocumentID != source.DocumentID || item.OperationID == "" || len(item.OperationID) > 512 {
 				return quoteProof{}, errors.New("receipt identity mismatch")
 			}
+			rangeKey := item.OriginalHash + "|" + strconv.Itoa(item.ReadOffset) + "|" + strconv.Itoa(item.ReadEnd)
+			if seenRanges[rangeKey] {
+				continue
+			}
+			seenRanges[rangeKey] = true
 			var joined retainedPart
 			offset, version := 0, ""
 			for {
@@ -821,6 +871,15 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 	}
 	if proof, ok := joinedQuote(parts, source); ok {
 		return proof, nil
+	}
+	for _, p := range parts {
+		if offset, ok := normalizedQuoteIndex(p.Text, source.Quote); ok {
+			proof := quoteProof{Operation: p.OperationID, Version: p.Version, Offset: p.ReadOffset + offset, MatchMode: "whitespace"}
+			if proof.SourceURL == "" && !p.SourceTruncated {
+				proof.SourceURL = p.Source
+			}
+			return proof, nil
+		}
 	}
 	return quoteProof{}, errors.New("quote not found within loaded retained receipts")
 }

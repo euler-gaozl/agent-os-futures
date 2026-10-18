@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestUncertainEvidenceCanBeRetainedWithoutInventedDates(t *testing.T) {
@@ -197,5 +198,36 @@ func TestStatementClaimRequiresSupportAndAcceptsExplicitSourceLine(t *testing.T)
 	r.Statements[0].Quote = "本文转载自新华财经，页面暂无详文。"
 	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); issue(c, "statement_support") {
 		t.Fatalf("explicit source line was not accepted: %+v", c.Issues)
+	}
+}
+
+func TestWhitespaceOnlyQuoteDifferenceIsExplicitNotSilent(t *testing.T) {
+	r := exampleReport()
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, func(context.Context, ReportSource) (quoteProof, error) {
+		return quoteProof{Operation: "task/read", Version: strings.Repeat("a", 64), MatchMode: "whitespace"}, nil
+	})
+	if !issue(c, "quote_normalized") || !c.Facts[0].QuoteMatched || c.Facts[0].Consistent {
+		t.Fatalf("whitespace match was not surfaced explicitly: %+v", c)
+	}
+	if feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf); feedback.Status != "source_review_required" || len(feedback.Revise) != 0 {
+		t.Fatalf("normalized quote should remain source review: %+v", feedback)
+	}
+}
+
+func TestReceiptBudgetIsNotReportedAsQuoteMismatch(t *testing.T) {
+	r := exampleReport()
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, func(context.Context, ReportSource) (quoteProof, error) {
+		return quoteProof{}, errReceiptBudget
+	})
+	if !issue(c, "receipt_budget") || issue(c, "retained_quote") {
+		t.Fatalf("budget exhaustion was misreported as a bad quote: %+v", c.Issues)
+	}
+}
+
+func TestNormalizedQuoteIndexPreservesOriginalOffset(t *testing.T) {
+	text := "来源：监测显示，9月18日，进口 大豆 库存869万吨。"
+	off, ok := normalizedQuoteIndex(text, "进口大豆库存869万吨")
+	if !ok || string([]rune(text)[off:off+utf8.RuneCountInString("进口 大豆 库存869万吨")]) != "进口 大豆 库存869万吨" {
+		t.Fatalf("normalized offset lost mapping: %d %v", off, ok)
 	}
 }
