@@ -292,3 +292,35 @@ func TestPublicationMonthDoesNotBorrowStatisticalPeriod(t *testing.T) {
 		t.Fatalf("publication month was treated as a statistical month: %+v", c.Issues)
 	}
 }
+
+func TestFindingMonthUsesRoleRatherThanYear(t *testing.T) {
+	for _, tc := range []struct {
+		name, text   string
+		hard, review bool
+	}{
+		{"dated material", "2026年10月的材料提到，2026年9月大豆到港预估1018.55万吨。", false, true},
+		{"publication variant", "2026年10月8日对外发布的报告披露，2026年9月大豆到港预估1018.55万吨。", false, false},
+		{"unknown dated wording", "2026年10月值得进一步核对，2026年9月大豆到港预估1018.55万吨。", false, true},
+		{"unknown month without year", "六月的材料提到，9月大豆到港预估1018.55万吨。", false, true},
+		{"document about statistic", "2026年10月库存报告提到，9月大豆到港预估1018.55万吨。", false, true},
+		{"wrong statistical year", "2025年9月库存情况。", true, false},
+		{"statistical month without year", "6月末库存为74.29万吨。", true, false},
+		{"Chinese statistical month", "六月末库存为74.29万吨。", true, false},
+		{"explicit statistical label", "统计月份：2025年9月。", true, false},
+		{"covered statistical period", "2026年9月大豆到港预估1018.55万吨。", false, false},
+		{"metadata label", "采集时间：2026年10月8日，2026年9月大豆到港预估1018.55万吨。", false, false},
+		{"classification label", "分类基准日为2026年10月9日，2026年9月大豆到港预估1018.55万吨。", false, false},
+		{"metadata does not hide later error", "发布日期：2026年10月8日，2025年9月库存情况。", true, false},
+		{"same month different roles", "2026年10月8日发布，2026年10月库存为113万吨。", true, false},
+		{"later metadata is not adjacent", "2026年10月的库存报告拟对外发布，2026年9月大豆到港预估1018.55万吨。", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := exampleReport()
+			r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: tc.text, FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
+			c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+			if issue(c, "finding_period_borrow") != tc.hard || issue(c, "finding_period_review") != tc.review {
+				t.Fatalf("want hard=%v review=%v, got %+v", tc.hard, tc.review, c.Issues)
+			}
+		})
+	}
+}

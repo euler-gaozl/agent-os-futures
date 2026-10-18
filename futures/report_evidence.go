@@ -102,7 +102,7 @@ func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, c
 		if len(f.FactIDs) > 0 {
 			hard, review := findingMonthBorrow(f.Text, f.FactIDs, facts)
 			if hard {
-				add(findingPath, "finding_period_borrow", "解读明确写出的年份/月份没有被所引事实的统计期覆盖；请引用该月份的独立事实，不能用一个时点事实承载其他月份。")
+				add(findingPath, "finding_period_borrow", "解读明确用于统计陈述的月份没有被所引事实的统计期覆盖；请引用该月份的独立事实，不能用一个时点事实承载其他月份。")
 			} else if review {
 				add(findingPath, "finding_period_review", "解读中的月份无法确认是统计期还是发布/采集时间；保留人工复核，不直接判为跨期错误。")
 			}

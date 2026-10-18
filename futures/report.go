@@ -187,8 +187,37 @@ var statementCounter = regexp.MustCompile(`^(?:页|条|期|周|月|日|号|年|�
 var statementDigits = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
 var chineseMultiplier = regexp.MustCompile(`翻倍|翻番|成倍`)
 var statementClaim = regexp.MustCompile(`暂无详文|无详文|转引|不同调查|调查方法|样本与调查方式`)
-var findingMonth = regexp.MustCompile(`(?:([0-9]{4})年)?([0-9]{1,2}|[一二三四五六七八九十]{1,3})月(?:末)?`)
-var publicationAfter = regexp.MustCompile(`^\s*(?:[0-9]{1,2}日?)?\s*(?:发布|发稿|刊发|采集|归档|更新|为分类基准)`)
+var findingMonth = regexp.MustCompile(`(?:([0-9]{4})年)?([0-9]{1,2}|[一二三四五六七八九十]{1,3})月(?:[0-9]{1,2}[日号]|末|初|份|底|上旬|中旬|下旬)?`)
+var publicationBefore = regexp.MustCompile(`(?:发布日期|发布时间|发稿时间|采集时间|归档时间|抓取时间|整理时间|分类基准日?)(?:\s*(?:为|是|于|[:：]))?\s*$`)
+var publicationAfter = regexp.MustCompile(`^\s*(?:(?:正式|对外|首次|再次|公开)\s*)*(?:发布|发稿|刊发|采集|抓取|归档|更新|整理|为分类基准)`)
+var statisticalMonthBefore = regexp.MustCompile(`(?:统计期|统计月份|统计日期|统计时间|统计时点|库存时点)(?:\s*(?:为|是|截至|[:：]))?\s*$`)
+var statisticalMonthAfter = regexp.MustCompile(`^\s*(?:的)?[\p{Han}\s]{0,24}(?:库存|到港|压榨|产量|产能|进口量|出口量|供应量|消费量|需求量|开工率|产能利用率|仓单|未执行合同)(?:\s|为|是|约|达|预估|预计|估计|预测|计划|情况|数量|水平|总量|合计|增加|减少|上升|下降|较|比|[0-9]|$)`)
+var documentMonthContext = regexp.MustCompile(`报告|材料|文章|资料|文件|发布|发稿|刊发|采集|归档|抓取|整理|分类`)
+
+func monthClauseBoundary(r rune) bool {
+	return strings.ContainsRune("，,。；;！？!?\n\r", r)
+}
+
+// Only locally explicit statistical wording can require revision. Unknown
+// language stays reviewable; a year alone says nothing about a date's role.
+func findingMonthRole(before, after string) (statistical, publication bool) {
+	if i := strings.LastIndexFunc(before, monthClauseBoundary); i >= 0 {
+		_, size := utf8.DecodeRuneInString(before[i:])
+		before = before[i+size:]
+	}
+	if i := strings.IndexFunc(after, monthClauseBoundary); i >= 0 {
+		after = after[:i]
+	}
+	if statisticalMonthBefore.MatchString(before) {
+		return true, false
+	}
+	if publicationBefore.MatchString(before) || publicationAfter.MatchString(after) {
+		return false, true
+	}
+	// A report about inventory is not itself an inventory observation. Do not
+	// classify a document's month using a statistic mentioned later in its text.
+	return !documentMonthContext.MatchString(after) && statisticalMonthAfter.MatchString(after), false
+}
 
 func periodCoversMonth(p ReportPeriod, month int) bool {
 	return periodCoversYearMonth(p, 0, month)
@@ -236,36 +265,30 @@ func monthNumber(v string) (int, bool) {
 }
 
 func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) (hard, review bool) {
-	type yearMonth struct{ year, month int }
-	months := map[yearMonth]bool{}
 	matches := findingMonth.FindAllStringSubmatchIndex(text, -1)
-	for _, m := range matches {
+	for i, m := range matches {
 		month, ok := monthNumber(text[m[4]:m[5]])
 		if !ok {
 			continue
 		}
-		start, end := m[0], m[1]
-		before, after := text[max(0, start-24):start], text[end:min(len(text), end+24)]
-		publicationContext := false
-		for _, term := range []string{"发布日期", "发布时间", "发稿时间", "采集时间", "归档时间", "抓取时间", "整理时间", "分类基准"} {
-			if strings.Contains(before, term) {
-				publicationContext = true
-				break
-			}
+		start, end := 0, len(text)
+		if i > 0 {
+			start = matches[i-1][1]
 		}
-		if publicationContext || publicationAfter.MatchString(after) {
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
+		statistical, publication := findingMonthRole(text[start:m[0]], text[m[1]:end])
+		if publication {
 			continue
 		}
 		year := 0
 		if m[2] >= 0 {
 			year, _ = strconv.Atoi(text[m[2]:m[3]])
 		}
-		months[yearMonth{year, month}] = true
-	}
-	for ref := range months {
 		covered := false
 		for _, id := range ids {
-			if periodCoversYearMonth(facts[id].Period, ref.year, ref.month) {
+			if periodCoversYearMonth(facts[id].Period, year, month) {
 				covered = true
 				break
 			}
@@ -273,7 +296,7 @@ func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) 
 		if covered {
 			continue
 		}
-		if ref.year != 0 {
+		if statistical {
 			hard = true
 		} else {
 			review = true
