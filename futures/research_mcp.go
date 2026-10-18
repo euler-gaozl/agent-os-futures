@@ -71,7 +71,7 @@ func reviewDraft(ctx context.Context, raw, asOf string) draftFeedback {
 			seen[issue.Code] = true
 		}
 		switch issue.Code {
-		case "anchor", "period_anchor", "estimate_anchor", "plan_anchor", "comparability", "retained_unchecked", "ai_summary", "evidence_unverified", "period_inferred", "period_unknown", "source_limitations", "finding_review", "statement_ai_summary", "statement_unverified", "statement_limitations", "statement_review", "quote_normalized", "receipt_budget":
+		case "anchor", "period_anchor", "estimate_anchor", "plan_anchor", "comparability", "retained_unchecked", "ai_summary", "evidence_unverified", "period_inferred", "period_unknown", "source_limitations", "finding_review", "statement_ai_summary", "statement_unverified", "statement_limitations", "statement_review", "quote_normalized", "receipt_budget", "finding_period_review":
 			out.SourceReview = append(out.SourceReview, item)
 		default:
 			out.Revise = append(out.Revise, item)

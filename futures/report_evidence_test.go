@@ -249,7 +249,7 @@ func TestStatementClaimCounterexamples(t *testing.T) {
 
 func TestFindingMonthMustBeCoveredByCitedFact(t *testing.T) {
 	r := exampleReport()
-	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "6月末库存为74.29万吨，9月18日为117.32万吨。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
+	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "2025年6月末库存为74.29万吨，9月18日为117.32万吨。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
 	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
 	if !issue(c, "finding_period_borrow") {
 		t.Fatalf("finding borrowed a month outside the cited fact: %+v", c.Issues)
@@ -280,5 +280,15 @@ func TestJointQuoteWhitespaceAcrossSegments(t *testing.T) {
 	proof, ok := joinedQuote(parts, ReportSource{DocumentID: "doc-1", Quote: "进口大豆库存869万吨"})
 	if !ok || proof.MatchMode != "whitespace" || proof.Offset != 0 || len(proof.Segments) != 2 {
 		t.Fatalf("cross-segment whitespace match was not explicit: %+v %v", proof, ok)
+	}
+}
+
+func TestPublicationMonthDoesNotBorrowStatisticalPeriod(t *testing.T) {
+	r := exampleReport()
+	r.Facts[0].Period = ReportPeriod{Start: "2026-09-01", End: "2026-09-30"}
+	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "2026年10月8日发布的报告披露：2026年9月大豆压榨991.04万吨。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if issue(c, "finding_period_borrow") || issue(c, "finding_period_review") {
+		t.Fatalf("publication month was treated as a statistical month: %+v", c.Issues)
 	}
 }

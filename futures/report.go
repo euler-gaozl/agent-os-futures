@@ -188,6 +188,7 @@ var statementDigits = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
 var chineseMultiplier = regexp.MustCompile(`翻倍|翻番|成倍`)
 var statementClaim = regexp.MustCompile(`暂无详文|无详文|转引|不同调查|调查方法|样本与调查方式`)
 var findingMonth = regexp.MustCompile(`(?:([0-9]{4})年)?([0-9]{1,2}|[一二三四五六七八九十]{1,3})月(?:末)?`)
+var publicationAfter = regexp.MustCompile(`^\s*(?:[0-9]{1,2}日?)?\s*(?:发布|发稿|刊发|采集|归档|更新|为分类基准)`)
 
 func periodCoversMonth(p ReportPeriod, month int) bool {
 	return periodCoversYearMonth(p, 0, month)
@@ -234,22 +235,32 @@ func monthNumber(v string) (int, bool) {
 	return 0, false
 }
 
-func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) bool {
+func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) (hard, review bool) {
 	type yearMonth struct{ year, month int }
 	months := map[yearMonth]bool{}
-	for _, m := range findingMonth.FindAllStringSubmatch(text, -1) {
-		month, ok := monthNumber(m[2])
+	matches := findingMonth.FindAllStringSubmatchIndex(text, -1)
+	for _, m := range matches {
+		month, ok := monthNumber(text[m[4]:m[5]])
 		if !ok {
 			continue
 		}
+		start, end := m[0], m[1]
+		before, after := text[max(0, start-24):start], text[end:min(len(text), end+24)]
+		publicationContext := false
+		for _, term := range []string{"发布日期", "发布时间", "发稿时间", "采集时间", "归档时间", "抓取时间", "整理时间", "分类基准"} {
+			if strings.Contains(before, term) {
+				publicationContext = true
+				break
+			}
+		}
+		if publicationContext || publicationAfter.MatchString(after) {
+			continue
+		}
 		year := 0
-		if m[1] != "" {
-			year, _ = strconv.Atoi(m[1])
+		if m[2] >= 0 {
+			year, _ = strconv.Atoi(text[m[2]:m[3]])
 		}
 		months[yearMonth{year, month}] = true
-	}
-	if len(months) == 0 {
-		return false
 	}
 	for ref := range months {
 		covered := false
@@ -259,11 +270,16 @@ func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) 
 				break
 			}
 		}
-		if !covered {
-			return true
+		if covered {
+			continue
+		}
+		if ref.year != 0 {
+			hard = true
+		} else {
+			review = true
 		}
 	}
-	return false
+	return hard, review
 }
 
 func unsupportedStatementClaim(text, quote string) bool {
@@ -1053,6 +1069,6 @@ func reportInstructions(asOf string) string {
 有支持事实的 question 用 findings 数组直接回答本问题；完全没有支持事实时允许 findings=[]，在 missing 中如实列出阻断该问题的具体依据，不借用或编造事实引用。每项 finding 为 {"kind":"observation 或 conflict 或 limitation","text":"对该核心问题的客观回答及证据边界","fact_ids":["本问题关联事实ID"],"statement_ids":["本问题关联说明ID"],"comparison_ids":[]}。分别说明直接答复、计算核验与原因解释，不只重复问题或罗列数据。只有两项报数的指标、单位、样本、数量类型和资料性质一致，原文明示两期同口径，统计期明确、互不重叠且前后顺序成立时，才据原文说明该来源报数上升、下降或不变，并关联两项事实。区分实绩、估计和计划报数，不能把估计或计划的方向说成实际变化；任一前提不明或冲突时，只并列报数与具体限制。此类有限观察不解除 source_limitations，不把来源报数提升为事实真实或已验证差额；AI 摘要、未确认来源及推断或未知统计期的现有比较限制仍保留。
 存在 source_limitations 或其他比较待核项时，差额与可比性仍保留待核，不自行补算差额、不删除限制换取通过；这不自动阻断原文已支持的方向、时期或性质答复。问题要求差额但尚未满足检查条件时，应明确差额待核及具体原因。原因解释需要额外证据，缺因果证据不能替代对已知事实的回答。所有数值仍须在 facts 保留并关联，解读不是自动验证的结论；source_review 必须按具体提示核对，不等于整份报告禁止作答。
 missing 只列尚未取得且阻断本问题直接答复的具体依据，能够回答时使用 []。原因解释、外部代表性、未来执行跟踪等资料，只有本问题确实要求该结论时才列为 missing，否则放在 findings 的 limitation 中。不能把已经关联的资料、任务明确排除的扩展资料或未请求的比较当成核心缺失；每项限制均须有实际依据，未确认的时间边界保留待核，不断言已经错位。
-事实拆分的硬性要求：每个 fact 对应一个独立统计观测（一个指标、一个样本、一个统计期和一个数值）；累计区间可以对应一个 fact；同一连续原文可以支持同一问题中已经拆分的多个事实，但每个 fact 的 period/value 必须与引用中的对应观测一致，不能用一个 fact 代表整句所有月份。跨月/跨地区/跨指标支持必须各自绑定正确的 period 和事实，不能借用其他观测。地区数量、地区占比或历史基数不得借用全国库存 fact，必须有自己的原文和事实。AI 摘要只能标 ai_summary，不能标 reported/estimate 作为发布者确认报数，不能用来支撑地区占比、跨月比较或最终结论；没有正文就保留待核和 missing。发布日期、标题日期、抓取日期都不能当统计日；找不到统计日就用 period_basis=unknown 并写明缺什么，不能把标题日期填进 period。讨论大豆压榨时不得把压榨写成“压缩机”；原文确实讨论设备压缩机时保留原文。缺失必须写入 missing，不能在正文有缺口时写 missing=[]。fact.quote 只能包含支持该 fact 的连续原文，不能把其他月份或其他样本的句子拼进来。如果 quote 在本任务实际读取回执中找不到，不能凭记忆改写或补引；保留报数为待核并写入 missing，不能把未读取的原文当作已核对。
+事实拆分的硬性要求：每个 fact 对应一个独立统计观测（一个指标、一个样本、一个统计期和一个数值）；累计区间可以对应一个 fact；同一连续原文可以支持同一问题中已经拆分的多个事实，但每个 fact 的 period/value 必须与引用中的对应观测一致，不能用一个 fact 代表整句所有月份。跨月/跨地区/跨指标支持必须各自绑定正确的 period 和事实，不能借用其他观测。地区数量、地区占比或历史基数不得借用全国库存 fact，必须有自己的原文和事实。AI 摘要只能标 ai_summary，不能标 reported/estimate 作为发布者确认报数，不能用来支撑地区占比、跨月比较或最终结论；没有正文就保留待核和 missing。发布日期、标题日期、抓取日期都不能当统计日；找不到统计日就用 period_basis=unknown 并写明缺什么，不能把标题日期填进 period。发布/采集/归档/分类基准日只能作为资料时间，不能当成统计期或“实际采集时间下限”。讨论大豆压榨时不得把压榨写成“压缩机”；原文确实讨论设备压缩机时保留原文。缺失必须写入 missing，不能在正文有缺口时写 missing=[]。fact.quote 只能包含支持该 fact 的连续原文，不能把其他月份或其他样本的句子拼进来。如果 quote 在本任务实际读取回执中找不到，不能凭记忆改写或补引；保留报数为待核并写入 missing，不能把未读取的原文当作已核对。不得仅因两篇资料都写“全国主要油厂”就断定同一监测口径；没有样本名单、方法稳定性或原发布者声明时，只能写“未取得口径一致确认”并并列报数，不能合并、平均或相减。不得仅因两个机构数字不同就断定样本或调查方法不同；只能说“未证明相同/不同口径待核”，不能把未证明升级成已证明。整理者备注、采集/归档/分类元数据不是发布者正文；说明引用必须来自发布者正文的连续片段，否则标 unverified 或放入 limitations，不能标 publisher_text。s1/s2 这类“转载/暂无详文”说明，引文必须包含该表述本身，不能只引日期或出处行。单月与累计窗口不同，差额幅度不必相等；只报两个差额并保留原因待核，不写“量级不匹配”暗示统计矛盾。
 quote 必须包含支持该报数的连续原文，最多2400字符，不能跨日期或样本借用其他数字。period_text逐字保留原文统计日期；没有明确年份或窗口时按 evidence 标注推断或未知，不为结构检查补造。最多40事实/20说明/8问题/30比较。自动检查只支持有限明确句式，未识别会标待核：不能为凑格式改写原文或删掉关键事实。估计、计划必须单列其nature，过去估计也不是实绩；库存是时点，压榨量是区间流量，累计流量另标cumulative_flow。开机率等比率使用ratio；时点未执行合同使用commitment，不能当实物库存。metric/scope使用稳定指标/样本名，日期只放period。百分比的前后差额是百分点。比较只有同一来源明确声明同口径且保留完整支持原文时才可能自动计算；没有声明则列待核口径，不能补写“同口径”。question 字段与 missing 文字保持中性，直接答复写在 findings：所有报数留在facts并关联fact_ids，不能把预估改称计划，不能为消除提示删掉关键数据。不要在 JSON 外输出自由总结；不得作预测、交易判断、因果结论或全库缺失断言。原文报数的历史方向观察不等于预测，未证实的解释保持问题与待查资料。保留问题与证据关系，先查关键资料，缺口按已授权公开来源继续调查，不能为过格式校验而删除问题。若绑定了check_research_draft_v2工具，最终输出前提交完整草稿和本任务as_of，依据revise修订并回查source_review；在任务固定步骤预算内完成必要核查。若执行器提供 final_output_commit，按冻结策略将最新就绪草稿的已提交 operation_id 和原文 SHA-256 交给该工具；它必须是该轮唯一工具调用，不再复制或改写草稿为最终回答。若该工具返回 selected=false 和 continue，立即结束当前回合，不再调用工具或输出正文；执行器会把 continue 作为下一条消息送回，届时按拒绝原因修订并重新送检；不得改以普通正文结束，也不得自行声称预算耗尽或剩余次数。未提供该工具的历史引擎，最终输出须逐字复制最后一次送检的 draft，不在送检后另改报数、日期、引用或解读；仍有待核项就明确保留，不伪称已核实。无法确认的项保留待核，不改原文、不删核心问题、不声称检查工具证明事实真实。`, asOf, asOf)
 }
