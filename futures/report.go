@@ -79,6 +79,7 @@ type FactCheck struct {
 	ID             string         `json:"id"`
 	Group          string         `json:"group"`
 	QuoteMatched   bool           `json:"quote_matched"`
+	QuoteMatchMode string         `json:"quote_match_mode,omitempty"`
 	OperationID    string         `json:"operation_id,omitempty"`
 	Version        string         `json:"version,omitempty"`
 	QuoteOffset    int            `json:"quote_offset"`
@@ -179,16 +180,37 @@ var chineseMultiplier = regexp.MustCompile(`翻倍|翻番|成倍`)
 var statementClaim = regexp.MustCompile(`暂无详文|无详文|转引|不同调查|调查方法|样本与调查方式`)
 
 func unsupportedStatementClaim(text, quote string) bool {
+	unsupported := false
+	hasAny := func(terms ...string) bool {
+		for _, term := range terms {
+			if strings.Contains(quote, term) {
+				return true
+			}
+		}
+		return false
+	}
 	if strings.Contains(text, "暂无详文") || strings.Contains(text, "无详文") {
-		return !strings.Contains(quote, "暂无") && !strings.Contains(quote, "详文")
+		if !(hasAny("暂无", "无详文") && strings.Contains(quote, "详文")) {
+			unsupported = true
+		}
 	}
 	if strings.Contains(text, "不同调查") || strings.Contains(text, "调查方法") || strings.Contains(text, "样本与调查方式") {
-		return !strings.Contains(quote, "调查") && !strings.Contains(quote, "样本") && !strings.Contains(quote, "方法")
+		matched := 0
+		for _, term := range []string{"调查", "方法", "样本", "不同"} {
+			if strings.Contains(quote, term) {
+				matched++
+			}
+		}
+		if matched < 2 {
+			unsupported = true
+		}
 	}
 	if strings.Contains(text, "转引") {
-		return !strings.Contains(quote, "转引") && !strings.Contains(quote, "来源") && !strings.Contains(quote, "据") && !strings.Contains(quote, "转载") && !strings.Contains(quote, "自述") && !strings.Contains(quote, "引述")
+		if !hasAny("转引", "转载", "自述", "引述") {
+			unsupported = true
+		}
 	}
-	return false
+	return unsupported
 }
 
 func normalizeWidthDigits(value string) string {
@@ -561,6 +583,10 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 					}
 				} else {
 					check.QuoteMatched = true
+					check.QuoteMatchMode = proof.MatchMode
+					if check.QuoteMatchMode == "" {
+						check.QuoteMatchMode = "exact"
+					}
 					check.OperationID = proof.Operation
 					check.Version = proof.Version
 					check.QuoteOffset = proof.Offset
@@ -628,6 +654,10 @@ func checkReport(ctx context.Context, raw, asOf string, read quoteReader) Report
 				}
 			} else {
 				check.QuoteMatched = true
+				check.QuoteMatchMode = proof.MatchMode
+				if check.QuoteMatchMode == "" {
+					check.QuoteMatchMode = "exact"
+				}
 				check.OperationID = proof.Operation
 				check.Version = proof.Version
 				check.QuoteOffset = proof.Offset

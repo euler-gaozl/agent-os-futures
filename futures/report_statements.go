@@ -18,6 +18,7 @@ type StatementCheck struct {
 	ID             string         `json:"id"`
 	ContentKind    string         `json:"content_kind"`
 	QuoteMatched   bool           `json:"quote_matched"`
+	QuoteMatchMode string         `json:"quote_match_mode,omitempty"`
 	OperationID    string         `json:"operation_id,omitempty"`
 	Version        string         `json:"version,omitempty"`
 	QuoteOffset    int            `json:"quote_offset"`

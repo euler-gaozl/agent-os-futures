@@ -231,3 +231,18 @@ func TestNormalizedQuoteIndexPreservesOriginalOffset(t *testing.T) {
 		t.Fatalf("normalized offset lost mapping: %d %v", off, ok)
 	}
 }
+
+func TestStatementClaimCounterexamples(t *testing.T) {
+	for _, tc := range []struct{ name, text, quote string }{
+		{"second claim", "页面暂无详文，两机构调查方法不同", "页面暂无详文"},
+		{"partial no-detail", "页面暂无详文", "暂无库存数据"},
+		{"database-is-not-source", "此数字是海关数据转引", "市场数据库"},
+	} {
+		r := exampleReport()
+		r.Statements = []ReportStatement{{ID: "s1", Text: tc.text, DocumentID: "doc-1", Quote: tc.quote, ContentKind: "publisher_text", Limitations: []string{}}}
+		r.Questions[0].StatementIDs = []string{"s1"}
+		if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); !issue(c, "statement_support") {
+			t.Fatalf("%s: unsupported claim was accepted: %+v", tc.name, c.Issues)
+		}
+	}
+}
