@@ -260,3 +260,25 @@ func TestFindingMonthMustBeCoveredByCitedFact(t *testing.T) {
 		t.Fatalf("covered month was rejected: %+v", c.Issues)
 	}
 }
+
+func TestFindingMonthMustRespectYear(t *testing.T) {
+	r := exampleReport()
+	r.Facts[0].Period = ReportPeriod{Start: "2026-09-01", End: "2026-09-30"}
+	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "2025年9月库存情况。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if !issue(c, "finding_period_borrow") {
+		t.Fatal("accepted a 2025 month backed by a 2026 fact")
+	}
+}
+
+func TestJointQuoteWhitespaceAcrossSegments(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	parts := []retainedPart{
+		{OperationID: "task/read/1", DocumentID: "doc-1", OriginalHash: hash, Version: hash, ReadOffset: 0, ReadEnd: 6, Text: "进口 大豆 "},
+		{OperationID: "task/read/2", DocumentID: "doc-1", OriginalHash: hash, Version: hash, ReadOffset: 6, ReadEnd: 13, Text: "库存869万吨"},
+	}
+	proof, ok := joinedQuote(parts, ReportSource{DocumentID: "doc-1", Quote: "进口大豆库存869万吨"})
+	if !ok || proof.MatchMode != "whitespace" || proof.Offset != 0 || len(proof.Segments) != 2 {
+		t.Fatalf("cross-segment whitespace match was not explicit: %+v %v", proof, ok)
+	}
+}

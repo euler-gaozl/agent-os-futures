@@ -1,7 +1,6 @@
 package futures
 
 import (
-	"strings"
 	"unicode/utf8"
 )
 
@@ -17,9 +16,10 @@ type QuoteSegment struct {
 	QuoteEnd    int    `json:"quote_end"`
 }
 
-// Join only exact neighbours actually read at the same document version. No
-// live Knowledge reads, gap filling, whitespace normalization or fuzzy matching.
-// Eight loaded receipts bound the search; increasing ends prevent cycles.
+// Join only neighbours actually read at the same document version. No live
+// Knowledge reads, gap filling or fuzzy matching. Whitespace-only matches are
+// explicit (MatchMode=whitespace) and keep their rune offsets. Eight loaded
+// receipts bound the search; increasing ends prevent cycles.
 func joinedQuote(parts []retainedPart, source ReportSource) (quoteProof, bool) {
 	if len(parts) > 8 || source.Quote == "" {
 		return quoteProof{}, false
@@ -49,10 +49,10 @@ func joinedQuote(parts []retainedPart, source ReportSource) (quoteProof, bool) {
 	visit = func(path []retainedPart, text string) (quoteProof, bool) {
 		first, last := path[0], path[len(path)-1]
 		if len(path) > 1 {
-			if at := strings.Index(text, source.Quote); at >= 0 {
-				start := first.ReadOffset + utf8.RuneCountInString(text[:at])
-				end := start + utf8.RuneCountInString(source.Quote)
-				proof := quoteProof{Offset: start, OriginalHash: first.OriginalHash}
+			if at, endAt, mode, ok := quoteMatchRange(text, source.Quote); ok {
+				start := first.ReadOffset + at
+				end := first.ReadOffset + endAt
+				proof := quoteProof{Offset: start, OriginalHash: first.OriginalHash, MatchMode: mode}
 				for _, p := range path {
 					a, b := max(start, p.ReadOffset), min(end, p.ReadEnd)
 					if a >= b {

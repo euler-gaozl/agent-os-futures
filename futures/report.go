@@ -134,6 +134,15 @@ type quoteProof struct {
 type quoteReader func(context.Context, ReportSource) (quoteProof, error)
 
 func normalizedQuoteIndex(text, quote string) (int, bool) {
+	start, _, _, ok := quoteMatchRange(text, quote)
+	return start, ok
+}
+
+func quoteMatchRange(text, quote string) (int, int, string, bool) {
+	if at := strings.Index(text, quote); at >= 0 {
+		start := utf8.RuneCountInString(text[:at])
+		return start, start + utf8.RuneCountInString(quote), "exact", true
+	}
 	var normalized []rune
 	var positions []int
 	for i, r := range []rune(text) {
@@ -150,14 +159,14 @@ func normalizedQuoteIndex(text, quote string) (int, bool) {
 		return r
 	}, quote))
 	if len(target) == 0 || len(target) > len(normalized) {
-		return 0, false
+		return 0, 0, "", false
 	}
 	for start := 0; start+len(target) <= len(normalized); start++ {
 		if string(normalized[start:start+len(target)]) == string(target) {
-			return positions[start], true
+			return positions[start], positions[start+len(target)-1] + 1, "whitespace", true
 		}
 	}
-	return 0, false
+	return 0, 0, "", false
 }
 
 var errReceiptBudget = errors.New("receipt lookup budget exhausted")
@@ -178,9 +187,13 @@ var statementCounter = regexp.MustCompile(`^(?:页|条|期|周|月|日|号|年|�
 var statementDigits = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
 var chineseMultiplier = regexp.MustCompile(`翻倍|翻番|成倍`)
 var statementClaim = regexp.MustCompile(`暂无详文|无详文|转引|不同调查|调查方法|样本与调查方式`)
-var findingMonth = regexp.MustCompile(`([0-9]{1,2})月(?:末)?`)
+var findingMonth = regexp.MustCompile(`(?:([0-9]{4})年)?([0-9]{1,2}|[一二三四五六七八九十]{1,3})月(?:末)?`)
 
 func periodCoversMonth(p ReportPeriod, month int) bool {
+	return periodCoversYearMonth(p, 0, month)
+}
+
+func periodCoversYearMonth(p ReportPeriod, year, month int) bool {
 	start, err := time.Parse("2006-01-02", p.Start)
 	if err != nil {
 		return false
@@ -190,7 +203,7 @@ func periodCoversMonth(p ReportPeriod, month int) bool {
 		return false
 	}
 	for t := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC); !t.After(end); t = t.AddDate(0, 1, 0) {
-		if int(t.Month()) == month {
+		if int(t.Month()) == month && (year == 0 || t.Year() == year) {
 			return true
 		}
 		if t.Year() == end.Year() && t.Month() == end.Month() {
@@ -200,20 +213,48 @@ func periodCoversMonth(p ReportPeriod, month int) bool {
 	return false
 }
 
-func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) bool {
-	months := map[int]bool{}
-	for _, m := range findingMonth.FindAllStringSubmatch(text, -1) {
-		if n, err := strconv.Atoi(m[1]); err == nil && n >= 1 && n <= 12 {
-			months[n] = true
+func monthNumber(v string) (int, bool) {
+	if n, err := strconv.Atoi(v); err == nil {
+		return n, n >= 1 && n <= 12
+	}
+	digits := map[rune]int{'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+	runes := []rune(v)
+	if len(runes) == 1 && runes[0] == '十' {
+		return 10, true
+	}
+	if len(runes) == 2 && runes[0] == '十' {
+		if n, ok := digits[runes[1]]; ok {
+			return 10 + n, true
 		}
+	}
+	if len(runes) == 1 {
+		n, ok := digits[runes[0]]
+		return n, ok
+	}
+	return 0, false
+}
+
+func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) bool {
+	type yearMonth struct{ year, month int }
+	months := map[yearMonth]bool{}
+	for _, m := range findingMonth.FindAllStringSubmatch(text, -1) {
+		month, ok := monthNumber(m[2])
+		if !ok {
+			continue
+		}
+		year := 0
+		if m[1] != "" {
+			year, _ = strconv.Atoi(m[1])
+		}
+		months[yearMonth{year, month}] = true
 	}
 	if len(months) == 0 {
 		return false
 	}
-	for month := range months {
+	for ref := range months {
 		covered := false
 		for _, id := range ids {
-			if periodCoversMonth(facts[id].Period, month) {
+			if periodCoversYearMonth(facts[id].Period, ref.year, ref.month) {
 				covered = true
 				break
 			}
@@ -838,6 +879,7 @@ type reportEvidenceReader struct {
 	base            string
 	requests, bytes int
 	cache           map[string][]retainedPart
+	more            map[string]bool
 }
 
 func (r *reportEvidenceReader) request(ctx context.Context, uri string, out any) error {
@@ -861,6 +903,7 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 		if len(list.Items) > 8 {
 			return quoteProof{}, errors.New("receipt list limit")
 		}
+		more := list.Next != ""
 		for _, item := range list.Items {
 			if item.DocumentID != source.DocumentID || item.OperationID == "" || len(item.OperationID) > 512 {
 				return quoteProof{}, errors.New("receipt identity mismatch")
@@ -889,7 +932,7 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 				}
 				r.bytes += len(part.Text)
 				if r.bytes > 256<<10 {
-					return quoteProof{}, errors.New("receipt byte limit")
+					return quoteProof{}, errReceiptBudget
 				}
 				if offset == 0 {
 					joined = part
@@ -911,6 +954,12 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 			parts = append(parts, joined)
 		}
 		r.cache[source.DocumentID] = parts
+		if more {
+			if r.more == nil {
+				r.more = map[string]bool{}
+			}
+			r.more[source.DocumentID] = true
+		}
 	}
 	for _, p := range parts {
 		if offset := strings.Index(p.Text, source.Quote); offset >= 0 {
@@ -956,6 +1005,9 @@ func (r *reportEvidenceReader) quote(ctx context.Context, source ReportSource) (
 			}
 			return proof, nil
 		}
+	}
+	if r.more[source.DocumentID] {
+		return quoteProof{}, errReceiptBudget
 	}
 	return quoteProof{}, errors.New("quote not found within loaded retained receipts")
 }
