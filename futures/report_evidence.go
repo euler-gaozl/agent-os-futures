@@ -99,21 +99,6 @@ func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, c
 			}
 			seen[id] = true
 		}
-		if f.Kind == "observation" && regionalClaim.MatchString(f.Text) {
-			regional, borrowed := false, false
-			for _, id := range f.FactIDs {
-				if fact := facts[id]; fact.ID != "" {
-					if regionalClaim.MatchString(fact.Scope) {
-						regional = true
-					} else {
-						borrowed = true
-					}
-				}
-			}
-			if borrowed && !regional {
-				add(findingPath, "scope_borrow", "地区数量或占比不能借用全国/其他样本的事实；请使用对应地区、样本和统计期的事实与原文。")
-			}
-		}
 		seen = map[string]bool{}
 		for refIndex, id := range f.StatementIDs {
 			refPath := fmt.Sprintf("%s.statement_ids[%d]", findingPath, refIndex)

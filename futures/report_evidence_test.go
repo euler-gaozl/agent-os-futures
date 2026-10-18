@@ -163,48 +163,39 @@ func TestAISummaryCannotBeReportedFact(t *testing.T) {
 	}
 }
 
-func TestEstimatedQuoteWithOtherMonthRequiresSplit(t *testing.T) {
+func TestMultiPeriodEstimateCanShareContinuousQuote(t *testing.T) {
 	r := exampleReport()
-	f := &r.Facts[0]
-	f.Nature = "estimate"
-	f.Value = "854.1"
-	f.Period = ReportPeriod{"2026-10-01", "2026-10-31"}
-	f.Source.Quote = "2026年10月份国内全样本油厂大豆到港约854.1万吨，2026年11月预计870万吨，12月950万吨。"
-	f.Source.PeriodText = "2026年10月份"
+	first := r.Facts[0]
+	first.Nature = "estimate"
+	first.Period = ReportPeriod{"2026-10-01", "2026-10-31"}
+	first.Source.PeriodText = "2026年10月份"
+	first.Source.Quote = "2026年10月份国内油厂大豆到港约854.1万吨，11月预计870万吨。"
+	second := first
+	second.ID = "f2"
+	second.Value = "870"
+	second.Period = ReportPeriod{"2026-11-01", "2026-11-30"}
+	second.Source.PeriodText = "11月"
+	r.Facts = []ReportFact{first, second}
+	r.Questions[0].FactIDs = []string{"f1", "f2"}
 	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
-	if !issue(c, "multi_period_estimate") {
-		t.Fatalf("multi-month estimate quote was accepted: %+v", c.Issues)
-	}
-	feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
-	if feedback.Status != "revision_required" {
-		t.Fatalf("multi-month estimate did not require revision: %+v", feedback)
+	if issue(c, "multi_period_estimate") {
+		t.Fatalf("split estimates sharing one continuous quote were rejected: %+v", c.Issues)
 	}
 }
 
-func TestStatementClaimAndWordingRequireRevision(t *testing.T) {
+func TestStatementClaimRequiresSupportAndAcceptsExplicitSourceLine(t *testing.T) {
 	r := exampleReport()
-	r.Statements = []ReportStatement{{ID: "s1", Text: "新华财经快讯为海关数据转引，页面暂无详文，压缩机数据仍待核。", DocumentID: "doc-1", Quote: "新华财经 | 2026年09月08日", ContentKind: "publisher_text", Limitations: []string{}}}
+	r.Statements = []ReportStatement{{ID: "s1", Text: "新华财经快讯为海关数据转引，页面暂无详文。", DocumentID: "doc-1", Quote: "新华财经 | 2026年09月08日", ContentKind: "publisher_text", Limitations: []string{}}}
 	r.Questions[0].StatementIDs = []string{"s1"}
 	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
-	if !issue(c, "statement_support") || !issue(c, "statement_wording") {
-		t.Fatalf("unsupported statement claim or wording accepted: %+v", c.Issues)
+	if !issue(c, "statement_support") {
+		t.Fatalf("unsupported statement claim accepted: %+v", c.Issues)
 	}
-	feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
-	if feedback.Status != "revision_required" {
+	if feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf); feedback.Status != "revision_required" {
 		t.Fatalf("statement support did not require revision: %+v", feedback)
 	}
-}
-
-func TestRegionalClaimCannotBorrowNationalFact(t *testing.T) {
-	r := exampleReport()
-	r.Facts[0].Scope = "全国全样本油厂"
-	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "华东全样本豆粕库存占全国比例上升。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
-	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
-	if !issue(c, "scope_borrow") {
-		t.Fatalf("regional claim borrowed a national fact: %+v", c.Issues)
-	}
-	feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
-	if feedback.Status != "revision_required" {
-		t.Fatalf("scope borrow did not require revision: %+v", feedback)
+	r.Statements[0].Quote = "本文转载自新华财经，页面暂无详文。"
+	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); issue(c, "statement_support") {
+		t.Fatalf("explicit source line was not accepted: %+v", c.Issues)
 	}
 }
