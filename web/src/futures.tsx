@@ -4,6 +4,7 @@ import { ResearchAnswer } from "./evidence";
 import { TaskRetainedWork } from "./drafts";
 import { TaskFailureNotice, TaskReadFailure } from "./task-status";
 import { taskReadReducer, watchTask } from "./task-polling";
+import { TaskEvidenceBinding } from "./evidence-binding";
 import {
   ArrowLeft,
   ArrowUp,
@@ -66,7 +67,7 @@ function Futures() {
     [mobileNav, setMobileNav] = useState(false),
     [notice, setNotice] = useState(""),
     [historySearch, setHistorySearch] = useState(""),
-    [sourceID, setSourceID] = useState(""),
+    [revisionSource, setRevisionSource] = useState(""),
     [authRequired, setAuthRequired] = useState(false);
   const [{ result, error: readError, reading }, dispatchRead] = useReducer(
     taskReadReducer<any>,
@@ -127,6 +128,7 @@ function Futures() {
   };
   const fresh = () => {
     setSelected("");
+    setRevisionSource("");
     setMobileNav(false);
     key.current = crypto.randomUUID();
   };
@@ -144,6 +146,7 @@ function Futures() {
           period,
           question,
           as_of: asOf,
+          ...(revisionSource ? { evidence_source_run: revisionSource } : {}),
         },
         key.current,
       );
@@ -326,6 +329,23 @@ function Futures() {
               收集真实资料，核对关键变化，保留每一份证据。
             </p>
             <section className="research-composer">
+              {revisionSource && (
+                <div className="source-task">
+                  <b>修订源报告 · {revisionSource.slice(0, 8)}</b>
+                  <p>
+                    填写需要核查或修改的问题。提交时将固定关联源任务的原文证据，并保存为新任务。
+                  </p>
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setRevisionSource("");
+                      key.current = crypto.randomUUID();
+                    }}
+                  >
+                    取消修订关联
+                  </button>
+                </div>
+              )}
               <textarea
                 ref={input}
                 aria-label="研究问题"
@@ -528,9 +548,7 @@ function Futures() {
                   if (!related.length) return null;
                   return (
                     <div className="related-tasks">
-                      <small>
-                        同品种历史任务（人工核对，不是自动证据链）
-                      </small>
+                      <small>同品种历史任务（人工核对，不是自动证据链）</small>
                       <div className="button-row">
                         {related.map((item) => (
                           <button
@@ -545,28 +563,21 @@ function Futures() {
                     </div>
                   );
                 })()}
-                <div className="source-task">
-                  <small>
-                    输入源任务 ID（人工核对，不自动写入证据链）
-                  </small>
-                  <div className="button-row">
-                    <input
-                      value={sourceID}
-                      onChange={(event) => setSourceID(event.target.value)}
-                      placeholder="例如 a526d178…"
-                      aria-label="源任务 ID"
-                    />
-                    <button
-                      className="text-button"
-                      disabled={
-                        !/^[A-Za-z0-9_-]{6,128}$/.test(sourceID.trim())
-                      }
-                      onClick={() => setSelected(sourceID.trim())}
-                    >
-                      打开源任务
-                    </button>
-                  </div>
-                </div>
+                <TaskEvidenceBinding
+                  key={result.id}
+                  task={result}
+                  open={setSelected}
+                  refresh={() => setReadRetry((value) => value + 1)}
+                  revise={() => {
+                    setRevisionSource(result.id);
+                    setCommodity(result.commodity || commodity);
+                    setPeriod(result.period || period);
+                    setAsOf(result.as_of || asOf);
+                    setQuestion("");
+                    setSelected("");
+                    key.current = crypto.randomUUID();
+                  }}
+                />
                 <div className="research-progress">
                   <div>
                     <span className="progress-number">1</span>
@@ -650,7 +661,13 @@ function Futures() {
                         导出记录 <ArrowUpRight size={13} />
                       </button>
                     </div>
-                    <ResearchAnswer key={result.id} task={result.id}>
+                    <ResearchAnswer
+                      key={
+                        result.id +
+                        (result.evidence_binding?.manifest_sha256 || "")
+                      }
+                      task={result.id}
+                    >
                       {result.result}
                     </ResearchAnswer>
                   </article>
@@ -676,6 +693,9 @@ function Futures() {
                   </div>
                 )}
                 <TaskRetainedWork
+                  key={
+                    result.id + (result.evidence_binding?.manifest_sha256 || "")
+                  }
                   task={result.id}
                   status={result.status}
                   hasResult={Boolean(result.result)}

@@ -500,12 +500,13 @@ export function SourceDialog({
           <details className="source-details">
             <summary>来源定位信息</summary>
             <p>文档标识：{record.document_id}</p>
+            <p>原始阅读任务：{record.run_id}</p>
             {part?.quote_parts && (
               <>
                 <p>原文版本：{proof?.original_hash}</p>
                 {part.quote_parts.map((p) => (
                   <p key={p.operation_id}>
-                    阅读回执：{p.operation_id} · 版本：{p.version}
+                    阅读任务：{p.run_id} · 回执：{p.operation_id} · 版本：{p.version}
                   </p>
                 ))}
               </>
