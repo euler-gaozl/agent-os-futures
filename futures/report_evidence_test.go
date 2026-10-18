@@ -246,3 +246,17 @@ func TestStatementClaimCounterexamples(t *testing.T) {
 		}
 	}
 }
+
+func TestFindingMonthMustBeCoveredByCitedFact(t *testing.T) {
+	r := exampleReport()
+	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "6月末库存为74.29万吨，9月18日为117.32万吨。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if !issue(c, "finding_period_borrow") {
+		t.Fatalf("finding borrowed a month outside the cited fact: %+v", c.Issues)
+	}
+	r.Facts[0].Period = ReportPeriod{"2026-09-01", "2026-09-30"}
+	r.Questions[0].Findings[0].Text = "9月18日库存为117.32万吨。"
+	if c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote); issue(c, "finding_period_borrow") {
+		t.Fatalf("covered month was rejected: %+v", c.Issues)
+	}
+}

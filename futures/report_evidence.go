@@ -99,6 +99,9 @@ func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, c
 			}
 			seen[id] = true
 		}
+		if len(f.FactIDs) > 0 && findingMonthBorrow(f.Text, f.FactIDs, facts) {
+			add(findingPath, "finding_period_borrow", "解读提到的月份没有被所引事实的统计期覆盖；请引用该月份的独立事实，不能用一个时点事实承载其他月份。")
+		}
 		seen = map[string]bool{}
 		for refIndex, id := range f.StatementIDs {
 			refPath := fmt.Sprintf("%s.statement_ids[%d]", findingPath, refIndex)

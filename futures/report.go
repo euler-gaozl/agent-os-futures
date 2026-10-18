@@ -178,6 +178,52 @@ var statementCounter = regexp.MustCompile(`^(?:页|条|期|周|月|日|号|年|�
 var statementDigits = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
 var chineseMultiplier = regexp.MustCompile(`翻倍|翻番|成倍`)
 var statementClaim = regexp.MustCompile(`暂无详文|无详文|转引|不同调查|调查方法|样本与调查方式`)
+var findingMonth = regexp.MustCompile(`([0-9]{1,2})月(?:末)?`)
+
+func periodCoversMonth(p ReportPeriod, month int) bool {
+	start, err := time.Parse("2006-01-02", p.Start)
+	if err != nil {
+		return false
+	}
+	end, err := time.Parse("2006-01-02", p.End)
+	if err != nil || start.After(end) {
+		return false
+	}
+	for t := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC); !t.After(end); t = t.AddDate(0, 1, 0) {
+		if int(t.Month()) == month {
+			return true
+		}
+		if t.Year() == end.Year() && t.Month() == end.Month() {
+			break
+		}
+	}
+	return false
+}
+
+func findingMonthBorrow(text string, ids []string, facts map[string]ReportFact) bool {
+	months := map[int]bool{}
+	for _, m := range findingMonth.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil && n >= 1 && n <= 12 {
+			months[n] = true
+		}
+	}
+	if len(months) == 0 {
+		return false
+	}
+	for month := range months {
+		covered := false
+		for _, id := range ids {
+			if periodCoversMonth(facts[id].Period, month) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return true
+		}
+	}
+	return false
+}
 
 func unsupportedStatementClaim(text, quote string) bool {
 	unsupported := false
