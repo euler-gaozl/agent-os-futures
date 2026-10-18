@@ -146,3 +146,65 @@ func TestFindingsBindToQuestionWithoutClaimingSemanticVerification(t *testing.T)
 		t.Fatal(c)
 	}
 }
+
+func TestAISummaryCannotBeReportedFact(t *testing.T) {
+	r := exampleReport()
+	f := &r.Facts[0]
+	f.Nature = "reported"
+	f.Source.Quote = "智能摘要：2026年第39周大豆库存865.43万吨。内容由AI生成。"
+	f.Source.PeriodText = "2026年第39周"
+	f.Evidence = &ReportEvidence{ContentKind: "ai_summary", PeriodBasis: "inferred", PeriodNote: "时点由标题日期推定。", Limitations: []string{"AI生成摘要，未取得正文。"}}
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if !issue(c, "ai_summary_as_actual") {
+		t.Fatalf("AI summary was accepted as a reported fact: %+v", c.Issues)
+	}
+	if feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf); feedback.Status != "revision_required" {
+		t.Fatalf("AI summary did not require revision: %+v", feedback)
+	}
+}
+
+func TestEstimatedQuoteWithOtherMonthRequiresSplit(t *testing.T) {
+	r := exampleReport()
+	f := &r.Facts[0]
+	f.Nature = "estimate"
+	f.Value = "854.1"
+	f.Period = ReportPeriod{"2026-10-01", "2026-10-31"}
+	f.Source.Quote = "2026年10月份国内全样本油厂大豆到港约854.1万吨，2026年11月预计870万吨，12月950万吨。"
+	f.Source.PeriodText = "2026年10月份"
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if !issue(c, "multi_period_estimate") {
+		t.Fatalf("multi-month estimate quote was accepted: %+v", c.Issues)
+	}
+	feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
+	if feedback.Status != "revision_required" {
+		t.Fatalf("multi-month estimate did not require revision: %+v", feedback)
+	}
+}
+
+func TestStatementClaimAndWordingRequireRevision(t *testing.T) {
+	r := exampleReport()
+	r.Statements = []ReportStatement{{ID: "s1", Text: "新华财经快讯为海关数据转引，页面暂无详文，压缩机数据仍待核。", DocumentID: "doc-1", Quote: "新华财经 | 2026年09月08日", ContentKind: "publisher_text", Limitations: []string{}}}
+	r.Questions[0].StatementIDs = []string{"s1"}
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if !issue(c, "statement_support") || !issue(c, "statement_wording") {
+		t.Fatalf("unsupported statement claim or wording accepted: %+v", c.Issues)
+	}
+	feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
+	if feedback.Status != "revision_required" {
+		t.Fatalf("statement support did not require revision: %+v", feedback)
+	}
+}
+
+func TestRegionalClaimCannotBorrowNationalFact(t *testing.T) {
+	r := exampleReport()
+	r.Facts[0].Scope = "全国全样本油厂"
+	r.Questions[0].Findings = []ReportFinding{{Kind: "observation", Text: "华东全样本豆粕库存占全国比例上升。", FactIDs: []string{"f1"}, ComparisonIDs: []string{}}}
+	c := checkReport(context.Background(), encodeReport(t, r), r.AsOf, acceptedQuote)
+	if !issue(c, "scope_borrow") {
+		t.Fatalf("regional claim borrowed a national fact: %+v", c.Issues)
+	}
+	feedback := reviewDraft(context.Background(), encodeReport(t, r), r.AsOf)
+	if feedback.Status != "revision_required" {
+		t.Fatalf("scope borrow did not require revision: %+v", feedback)
+	}
+}

@@ -28,6 +28,9 @@ func checkEvidence(f ReportFact, path string, add func(string, string, string)) 
 	case "publisher_text":
 	case "ai_summary":
 		add(path, "ai_summary", "该报数来自 AI 摘要，只保留为调查线索，尚不能作为原发布者实绩或比较依据；须取得支持它的正文。")
+		if f.Nature == "reported" && e.PeriodBasis != "unknown" {
+			add(path, "ai_summary_as_actual", "AI 摘要不能标为已确认实绩或参与跨月/跨样本比较；请取得正文，或改为待核说明并保留缺口。")
+		}
 	case "unverified":
 		add(path, "evidence_unverified", "来源性质尚未确认，报数只保留待核，不能直接用于比较。")
 	default:
@@ -95,6 +98,21 @@ func checkFindings(q ReportQuestion, path string, facts map[string]ReportFact, c
 				add(refPath, "finding_reference", "该位置的事实存在于 facts，但未列入所属问题的 fact_ids；核对支持关系后修正本问题的引用归属，不能仅删除相关证据换取通过。")
 			}
 			seen[id] = true
+		}
+		if f.Kind == "observation" && regionalClaim.MatchString(f.Text) {
+			regional, borrowed := false, false
+			for _, id := range f.FactIDs {
+				if fact := facts[id]; fact.ID != "" {
+					if regionalClaim.MatchString(fact.Scope) {
+						regional = true
+					} else {
+						borrowed = true
+					}
+				}
+			}
+			if borrowed && !regional {
+				add(findingPath, "scope_borrow", "地区数量或占比不能借用全国/其他样本的事实；请使用对应地区、样本和统计期的事实与原文。")
+			}
 		}
 		seen = map[string]bool{}
 		for refIndex, id := range f.StatementIDs {
