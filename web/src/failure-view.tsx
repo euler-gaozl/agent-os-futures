@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { FileText } from "lucide-react";
-import { Badge } from "./shared";
 import {
   codeLabels,
   failureCopy,
@@ -32,34 +31,39 @@ function parameterLabel(diagnostics: TaskDiagnostics | null) {
 }
 
 export function TaskFailureView({
-  status,
   diagnostics,
   error,
   loading,
   retry,
+  processOpen,
+  onToggleProcess,
   onNewResearch,
 }: {
-  status: string;
   diagnostics: TaskDiagnostics | null;
   error: boolean;
   loading: boolean;
   retry: () => void;
+  processOpen?: boolean;
+  onToggleProcess?: () => void;
   onNewResearch: () => void;
 }) {
   const [details, setDetails] = useState(false);
   const copy = failureCopy(diagnostics);
   const usage = usageLine(diagnostics);
   const confirmed = diagnostics?.cause_confirmed === true;
+  const paused = diagnostics?.status === "waiting_unknown";
+  const cancelled = diagnostics?.status === "cancelled";
   const stage = diagnostics?.stage ? stageLabels[diagnostics.stage] : "";
   return (
     <section className="task-outcome" aria-label="执行结果与原因">
       <div className="outcome-heading">
         <FileText size={22} />
         <div>
-          <div className="outcome-kicker">执行已停止</div>
+          <div className="outcome-kicker">
+            {paused ? "执行暂停，等待核对" : cancelled ? "执行已取消" : "执行已停止"}
+          </div>
           <h2>{copy.headline}</h2>
         </div>
-        <Badge state={status} />
       </div>
       <p className="outcome-why">{copy.body}</p>
       <dl className="outcome-facts">
@@ -74,7 +78,11 @@ export function TaskFailureView({
             <dt>失败步骤</dt>
             <dd>
               {stage}
-              {confirmed ? "（已与终止记录对应）" : "（最后记录的异常，终止原因未确认）"}
+              {confirmed
+                ? paused
+                  ? "（已对应到待核对的调用）"
+                  : "（已与终止记录对应）"
+                : "（最后记录的异常，终止原因未确认）"}
             </dd>
           </>
         )}
@@ -104,9 +112,20 @@ export function TaskFailureView({
         >
           {details ? "收起错误详情" : "查看错误详情"}
         </button>
-        <button className="button primary" onClick={onNewResearch}>
-          修改问题并新建研究
-        </button>
+        {onToggleProcess && (
+          <button
+            className="button quiet"
+            aria-expanded={processOpen || false}
+            onClick={onToggleProcess}
+          >
+            {processOpen ? "收起生成过程" : "查看生成过程"}
+          </button>
+        )}
+        {!paused && (
+          <button className="button primary" onClick={onNewResearch}>
+            修改问题并新建研究
+          </button>
+        )}
       </div>
       {details && (
         <div className="outcome-details" role="region" aria-label="错误详情">

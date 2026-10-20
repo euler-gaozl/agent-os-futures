@@ -364,7 +364,11 @@ export function FailureRecords({
                 <span>{stageLabels[item.stage] || "未定位的步骤"}</span>
                 <span>{codeLabels[item.code] || "原因尚未确认"}</span>
                 <span className={item.cause_confirmed ? "" : "unconfirmed"}>
-                  {item.cause_confirmed ? "已与终止记录对应" : "终止原因未确认"}
+                  {item.status === "waiting_unknown"
+                    ? "已对应到待核对的调用"
+                    : item.cause_confirmed
+                      ? "已与终止记录对应"
+                      : "终止原因未确认"}
                 </span>
               </div>
               {item.period && <p className="failure-period">研究范围：{item.period}</p>}

@@ -36,12 +36,12 @@ const sample: TaskDiagnostics = {
 function view(diagnostics: TaskDiagnostics | null, error = false) {
   return renderToStaticMarkup(
     <TaskFailureView
-      status={diagnostics?.status || "failed"}
       diagnostics={diagnostics}
       error={error}
       loading={false}
       retry={() => {}}
       onNewResearch={() => {}}
+      onToggleProcess={() => {}}
     />,
   );
 }
@@ -74,6 +74,14 @@ test("an unavailable or unsupported diagnostic keeps the task state and does not
   });
   assert.match(unsupported, /当前执行服务尚未提供错误详情/);
   assert.doesNotMatch(unsupported, /parameter_rejected|HTTP/);
+});
+
+test("a paused task is not presented as stopped and does not invite a duplicate run", () => {
+  const html = view({ ...sample, status: "waiting_unknown", code: "effect_unknown" });
+  assert.match(html, /执行暂停，等待核对/);
+  assert.match(html, /有一项执行结果需要核对/);
+  assert.doesNotMatch(html, /修改问题并新建研究/);
+  assert.match(html, /查看错误详情/);
 });
 
 test("each failure class has its own headline and every copy names impact and next step", () => {

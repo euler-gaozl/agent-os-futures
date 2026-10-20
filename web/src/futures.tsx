@@ -688,7 +688,7 @@ export function Futures() {
             {result ? (
               <>
                 <header className="task-header">
-                  <div className="record-label">研究任务</div>
+                  <div className="record-label">任务记录</div>
                   <h1>{result.commodity} · 基本面研究</h1>
                   <dl className="task-scope">
                     <div>
@@ -741,24 +741,24 @@ export function Futures() {
                     </div>
                   );
                 })()}
-                <div className="task-actions" role="group" aria-label="任务操作">
-                  {result.result && (
+                {result.result && (
+                  <div
+                    className="task-actions"
+                    role="group"
+                    aria-label="任务操作"
+                  >
                     <button
                       className="button primary"
                       onClick={() => reviseTask(result)}
                     >
                       补充问题，生成新报告
                     </button>
-                  )}
-                  {result.result && (
                     <button
                       className="button"
                       onClick={() => void exportRecord(result)}
                     >
                       导出记录 <ArrowUpRight size={13} />
                     </button>
-                  )}
-                  {terminalStatus && (
                     <button
                       className="button quiet"
                       aria-expanded={processOpen}
@@ -766,8 +766,8 @@ export function Futures() {
                     >
                       {processOpen ? "收起生成过程" : "查看生成过程"}
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
                 {result.result ? (
                   <article className="research-document">
                     <div className="document-heading">
@@ -787,11 +787,12 @@ export function Futures() {
                   </article>
                 ) : terminalStatus ? (
                   <TaskFailureView
-                    status={result.status}
                     diagnostics={diagnosticsState.diagnostics}
                     error={diagnosticsState.error}
                     loading={diagnosticsState.loading}
                     retry={diagnosticsState.retry}
+                    processOpen={processOpen}
+                    onToggleProcess={() => setProcessOpen(!processOpen)}
                     onNewResearch={() => restartFrom(result)}
                   />
                 ) : (

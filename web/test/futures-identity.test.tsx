@@ -159,7 +159,12 @@ test("the real Futures parent keeps one evidence section across ten parent refre
     const failedDetail = container.querySelector(".research-result header h1");
     assert.match(failedDetail?.textContent || "", /豆粕/);
     assert.equal(container.querySelectorAll(".task-outcome").length, 1);
-    assert.equal(container.querySelectorAll(".task-actions").length, 1);
+    assert.equal(
+      container.querySelectorAll(".task-actions").length,
+      0,
+      "a failed task has no separate action strip",
+    );
+    assert.equal(container.querySelectorAll(".outcome-actions").length, 1);
 
     clickButton((t) => t.includes("查看生成过程"));
     await settle(6);
