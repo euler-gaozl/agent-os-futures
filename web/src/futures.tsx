@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
 import { ResearchAnswer } from "./evidence";
 import { TaskRetainedWork } from "./drafts";
 import { TaskFailureNotice, TaskReadFailure } from "./task-status";
 import { taskReadReducer, watchTask } from "./task-polling";
+import { taskSectionKeys } from "./task-keys";
 import { TaskEvidenceBinding } from "./evidence-binding";
 import {
   ArrowLeft,
@@ -34,15 +34,12 @@ import {
   Modal,
   Spinner,
 } from "./shared";
-import "./futures.css";
-import "./report.css";
-type Action = {
-  id: string;
+type Action = {  id: string;
   revision: number;
   name: string;
   description: string;
 };
-function Futures() {
+export function Futures() {
   const [actions, setActions] = useState<Action[]>([]),
     [tasks, setTasks] = useState<any[]>([]),
     [action, setAction] = useState<Action | null>(null),
@@ -251,6 +248,7 @@ function Futures() {
       </div>
     </>
   );
+  const sectionKeys = taskSectionKeys(result || { id: selected });
   if (!connected)
     return authRequired ? (
       <Login error={error} retry={() => void load().catch(connectionError)} />
@@ -564,7 +562,7 @@ function Futures() {
                   );
                 })()}
                 <TaskEvidenceBinding
-                  key={result.id}
+                  key={sectionKeys.evidence}
                   task={result}
                   open={setSelected}
                   refresh={() => setReadRetry((value) => value + 1)}
@@ -661,13 +659,7 @@ function Futures() {
                         导出记录 <ArrowUpRight size={13} />
                       </button>
                     </div>
-                    <ResearchAnswer
-                      key={
-                        result.id +
-                        (result.evidence_binding?.manifest_sha256 || "")
-                      }
-                      task={result.id}
-                    >
+                    <ResearchAnswer key={sectionKeys.report} task={result.id}>
                       {result.result}
                     </ResearchAnswer>
                   </article>
@@ -693,9 +685,7 @@ function Futures() {
                   </div>
                 )}
                 <TaskRetainedWork
-                  key={
-                    result.id + (result.evidence_binding?.manifest_sha256 || "")
-                  }
+                  key={sectionKeys.retained}
                   task={result.id}
                   status={result.status}
                   hasResult={Boolean(result.result)}
@@ -738,4 +728,3 @@ function Futures() {
     </div>
   );
 }
-createRoot(document.getElementById("app")!).render(<Futures />);
