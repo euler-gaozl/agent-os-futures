@@ -524,9 +524,11 @@ export function SourceDialog({
 export function ResearchAnswer({
   task,
   children,
+  instance,
 }: {
   task: string;
   children?: string;
+  instance?: string;
 }) {
   const [items, setItems] = useState<Evidence[]>([]),
     [cursor, setCursor] = useState("");
@@ -657,7 +659,12 @@ export function ResearchAnswer({
         )}
       </section>
       {children && (
-        <ReportReview task={task} raw={children} onSource={openSource} />
+        <ReportReview
+          task={task}
+          raw={children}
+          onSource={openSource}
+          instance={instance || "final:" + task}
+        />
       )}
       {source && (
         <SourceDialog

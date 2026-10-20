@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ResearchAnswer } from "./evidence";
 import { TaskRetainedWork } from "./drafts";
-import { TaskFailureNotice, TaskReadFailure } from "./task-status";
+import { TaskReadFailure } from "./task-status";
 import { taskReadReducer, watchTask } from "./task-polling";
 import { taskSectionKeys } from "./task-keys";
-import { TaskEvidenceBinding } from "./evidence-binding";
+import { TaskEvidencePanel } from "./evidence-binding";
+import { TaskFailureView } from "./failure-view";
+import { EvidenceCheckChip } from "./report";
+import { useTaskDiagnostics } from "./diagnostics";
 import {
   ArrowLeft,
   ArrowUp,
@@ -34,11 +37,67 @@ import {
   Modal,
   Spinner,
 } from "./shared";
-type Action = {  id: string;
+type Action = {
+  id: string;
   revision: number;
   name: string;
   description: string;
 };
+const executionNotes: Record<string, string> = {
+  queued: "等待执行",
+  running: "正在执行",
+  waiting_children: "等待子任务",
+  waiting_unknown: "执行暂停，等待核对",
+  completed: "执行已结束；研究核验见证据检查",
+  failed: "执行已停止",
+  cancelled: "执行已取消",
+};
+function executionNote(status: string) {
+  return executionNotes[status] || "";
+}
+
+// The failure step is shown as unfinished, never as a normal completion.
+function ResearchProgress({ status }: { status: string }) {
+  const stopped = ["failed", "waiting_unknown"].includes(status);
+  const cancelled = status === "cancelled";
+  return (
+    <div className="research-progress" aria-label="执行步骤">
+      <div>
+        <span className="progress-number">1</span>
+        <b>接收研究任务</b>
+        <Check size={15} />
+      </div>
+      <div
+        className={
+          (["queued"].includes(status) ? "pending " : "") +
+          (stopped ? "failed " : "") +
+          (cancelled ? "pending" : "")
+        }
+      >
+        <span className="progress-number">2</span>
+        <b>执行研究任务</b>
+        {status === "running" ? (
+          <Spinner />
+        ) : status === "completed" ? (
+          <Check size={15} />
+        ) : stopped ? (
+          <span className="step-note">未完成 · 执行已停止</span>
+        ) : cancelled ? (
+          <span className="step-note">已取消</span>
+        ) : null}
+      </div>
+      <div className={status === "completed" ? "" : "pending"}>
+        <span className="progress-number">3</span>
+        <b>生成研究记录</b>
+        {status === "completed" ? (
+          <Check size={15} />
+        ) : (
+          <span className="step-note">未生成</span>
+        )}
+      </div>
+    </div>
+  );
+}
 export function Futures() {
   const [actions, setActions] = useState<Action[]>([]),
     [tasks, setTasks] = useState<any[]>([]),
@@ -65,6 +124,7 @@ export function Futures() {
     [notice, setNotice] = useState(""),
     [historySearch, setHistorySearch] = useState(""),
     [revisionSource, setRevisionSource] = useState(""),
+    [processOpen, setProcessOpen] = useState(false),
     [authRequired, setAuthRequired] = useState(false);
   const [{ result, error: readError, reading }, dispatchRead] = useReducer(
     taskReadReducer<any>,
@@ -105,6 +165,9 @@ export function Futures() {
     const id = setInterval(() => void load().catch(connectionError), 6000);
     return () => clearInterval(id);
   }, [load]);
+  useEffect(() => {
+    setProcessOpen(false);
+  }, [selected]);
   useEffect(() => {
     dispatchRead({ type: "select", task: selected });
     if (!selected) return;
@@ -248,7 +311,74 @@ export function Futures() {
       </div>
     </>
   );
+  const restartFrom = (task: any) => {
+    setRevisionSource("");
+    setCommodity(task.commodity || commodity);
+    setPeriod(task.period || period);
+    setAsOf(task.as_of || asOf);
+    setQuestion("");
+    setSelected("");
+    key.current = crypto.randomUUID();
+  };
+  const reviseTask = (task: any) => {
+    setRevisionSource(task.id);
+    setCommodity(task.commodity || commodity);
+    setPeriod(task.period || period);
+    setAsOf(task.as_of || asOf);
+    setQuestion("");
+    setSelected("");
+    key.current = crypto.randomUUID();
+  };
+  const exportRecord = async (task: any) => {
+    let structured = false;
+    try {
+      structured = JSON.parse(task.result).schema === "futures-evidence-v1";
+    } catch {
+      /* Older answers retain Markdown. */
+    }
+    let content = task.result;
+    if (structured) {
+      try {
+        const check = await api(
+          "/tasks/" + encodeURIComponent(task.id) + "/report-check",
+        );
+        content = JSON.stringify(
+          {
+            format: "futures-research-export-v1",
+            task_id: task.id,
+            raw_result: task.result,
+            check,
+          },
+          null,
+          2,
+        );
+      } catch (e) {
+        setNotice("导出未完成：" + (e as Error).message);
+        return;
+      }
+    }
+    const blob = new Blob([content], {
+      type: structured
+        ? "application/json;charset=utf-8"
+        : "text/markdown;charset=utf-8",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = task.commodity + (structured ? "-研究记录.json" : "-研究记录.md");
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
   const sectionKeys = taskSectionKeys(result || { id: selected });
+  const diagnosticsState = useTaskDiagnostics(
+    result?.id || "",
+    result?.status || "",
+  );
+  const terminalStatus = Boolean(
+    result &&
+      ["completed", "failed", "cancelled", "waiting_unknown"].includes(
+        result.status,
+      ),
+  );
   if (!connected)
     return authRequired ? (
       <Login error={error} retry={() => void load().catch(connectionError)} />
@@ -526,12 +656,31 @@ export function Futures() {
             )}
             {result ? (
               <>
-                <header>
-                  <div className="record-label">已保存的研究任务</div>
+                <header className="task-header">
+                  <div className="record-label">研究任务</div>
                   <h1>{result.commodity} · 基本面研究</h1>
+                  <dl className="task-scope">
+                    <div>
+                      <dt>研究范围</dt>
+                      <dd>{result.period || "未填写"}</dd>
+                    </div>
+                    <div>
+                      <dt>分类基准日</dt>
+                      <dd>{result.as_of || "未设置"}</dd>
+                    </div>
+                    <div>
+                      <dt>提交时间</dt>
+                      <dd>{date(result.created_at)}</dd>
+                    </div>
+                  </dl>
                   <div className="research-meta">
                     <Badge state={result.status} />
-                    <span>{date(result.created_at)}</span>
+                    <span className="status-note">
+                      {executionNote(result.status)}
+                    </span>
+                    {result.result && (
+                      <EvidenceCheckChip task={result.id} raw={result.result} />
+                    )}
                   </div>
                 </header>
                 {(() => {
@@ -561,121 +710,58 @@ export function Futures() {
                     </div>
                   );
                 })()}
-                <TaskEvidenceBinding
-                  key={sectionKeys.evidence}
-                  task={result}
-                  open={setSelected}
-                  refresh={() => setReadRetry((value) => value + 1)}
-                  revise={() => {
-                    setRevisionSource(result.id);
-                    setCommodity(result.commodity || commodity);
-                    setPeriod(result.period || period);
-                    setAsOf(result.as_of || asOf);
-                    setQuestion("");
-                    setSelected("");
-                    key.current = crypto.randomUUID();
-                  }}
-                />
-                <div className="research-progress">
-                  <div>
-                    <span className="progress-number">1</span>
-                    <b>接收研究任务</b>
-                    <Check size={15} />
-                  </div>
-                  <div
-                    className={
-                      ["queued"].includes(result.status) ? "pending" : ""
-                    }
-                  >
-                    <span className="progress-number">2</span>
-                    <b>执行研究任务</b>
-                    {result.status === "running" ? (
-                      <Spinner />
-                    ) : result.status === "completed" ? (
-                      <Check size={15} />
-                    ) : null}
-                  </div>
-                  <div
-                    className={result.status === "completed" ? "" : "pending"}
-                  >
-                    <span className="progress-number">3</span>
-                    <b>生成研究记录</b>
-                    {result.status === "completed" && <Check size={15} />}
-                  </div>
+                <div className="task-actions" role="group" aria-label="任务操作">
+                  {result.result && (
+                    <button
+                      className="button primary"
+                      onClick={() => reviseTask(result)}
+                    >
+                      补充问题，生成新报告
+                    </button>
+                  )}
+                  {result.result && (
+                    <button
+                      className="button"
+                      onClick={() => void exportRecord(result)}
+                    >
+                      导出记录 <ArrowUpRight size={13} />
+                    </button>
+                  )}
+                  {terminalStatus && (
+                    <button
+                      className="button quiet"
+                      aria-expanded={processOpen}
+                      onClick={() => setProcessOpen(!processOpen)}
+                    >
+                      {processOpen ? "收起生成过程" : "查看生成过程"}
+                    </button>
+                  )}
                 </div>
                 {result.result ? (
                   <article className="research-document">
                     <div className="document-heading">
                       <FileText size={19} />
                       <span>研究记录</span>
-                      <button
-                        className="text-button"
-                        onClick={async () => {
-                          let structured = false;
-                          try {
-                            structured =
-                              JSON.parse(result.result).schema ===
-                              "futures-evidence-v1";
-                          } catch {
-                            /* Older answers retain Markdown. */
-                          }
-                          let content = result.result;
-                          if (structured) {
-                            try {
-                              const check = await api(
-                                "/tasks/" +
-                                  encodeURIComponent(result.id) +
-                                  "/report-check",
-                              );
-                              content = JSON.stringify(
-                                {
-                                  format: "futures-research-export-v1",
-                                  task_id: result.id,
-                                  raw_result: result.result,
-                                  check,
-                                },
-                                null,
-                                2,
-                              );
-                            } catch (e) {
-                              setNotice("导出未完成：" + (e as Error).message);
-                              return;
-                            }
-                          }
-                          const blob = new Blob([content], {
-                            type: structured
-                              ? "application/json;charset=utf-8"
-                              : "text/markdown;charset=utf-8",
-                          });
-                          const link = document.createElement("a");
-                          link.href = URL.createObjectURL(blob);
-                          link.download =
-                            result.commodity +
-                            (structured ? "-研究记录.json" : "-研究记录.md");
-                          link.click();
-                          URL.revokeObjectURL(link.href);
-                        }}
-                      >
-                        导出记录 <ArrowUpRight size={13} />
-                      </button>
+                      <small className="document-note">
+                        记录已生成；研究核验以证据检查为准
+                      </small>
                     </div>
-                    <ResearchAnswer key={sectionKeys.report} task={result.id}>
+                    <ResearchAnswer
+                      key={sectionKeys.report}
+                      task={result.id}
+                      instance={"final:" + result.id}
+                    >
                       {result.result}
                     </ResearchAnswer>
                   </article>
-                ) : result.status === "failed" ? (
-                  <TaskFailureNotice error={result.error || ""} />
-                ) : result.status === "waiting_unknown" ? (
-                  <div className="research-failure">
-                    <h3>有一项执行结果需要核对</h3>
-                    <p>
-                      当前任务已暂停。管理员核实外部服务回执后，才能继续处理。
-                    </p>
-                  </div>
-                ) : result.status === "cancelled" ? (
-                  <Empty
-                    title="研究已停止"
-                    detail="已有资料和执行记录仍保留在工作区。"
+                ) : terminalStatus ? (
+                  <TaskFailureView
+                    status={result.status}
+                    diagnostics={diagnosticsState.diagnostics}
+                    error={diagnosticsState.error}
+                    loading={diagnosticsState.loading}
+                    retry={diagnosticsState.retry}
+                    onNewResearch={() => restartFrom(result)}
                   />
                 ) : (
                   <div className="research-wait">
@@ -684,12 +770,31 @@ export function Futures() {
                     <p>已完成的进度会自动保存，你可以稍后回来查看。</p>
                   </div>
                 )}
-                <TaskRetainedWork
-                  key={sectionKeys.retained}
-                  task={result.id}
-                  status={result.status}
-                  hasResult={Boolean(result.result)}
-                />
+                {result.result && (
+                  <TaskEvidencePanel
+                    task={result}
+                    open={setSelected}
+                    refresh={() => setReadRetry((value) => value + 1)}
+                  />
+                )}
+                {terminalStatus && processOpen && (
+                  <section className="generation-panel" aria-label="生成过程">
+                    <h2>生成过程</h2>
+                    <p className="panel-note">
+                      执行步骤、留存的检查草稿与资料，只读；展开或导出不会重新执行研究。
+                    </p>
+                    <ResearchProgress status={result.status} />
+                    <TaskRetainedWork
+                      key={sectionKeys.retained}
+                      task={result.id}
+                      status={result.status}
+                      hasResult={Boolean(result.result)}
+                    />
+                  </section>
+                )}
+                {!terminalStatus && (
+                  <ResearchProgress status={result.status} />
+                )}
                 {["running", "queued", "waiting_children"].includes(
                   result.status,
                 ) && (

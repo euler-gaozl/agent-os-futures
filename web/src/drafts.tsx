@@ -107,6 +107,7 @@ export function DraftContent({
         check={draft.check}
         raw={draft.raw}
         onSource={onSource}
+        instance={"draft:" + draft.operation_id + ":" + draft.version}
         rawLabel="送检草稿原文（完整保留）"
       />
     </>
@@ -148,6 +149,7 @@ export function RetainedDrafts({ task }: { task: string }) {
     [draft, setDraft] = useState<RetainedDraft | null>(null);
   const [busy, setBusy] = useState(true),
     [loading, setLoading] = useState(false),
+    [loaded, setLoaded] = useState(false),
     [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [source, setSource] = useState<{
@@ -163,6 +165,7 @@ export function RetainedDrafts({ task }: { task: string }) {
     setItems([]);
     setSelected(null);
     setCursor("");
+    setLoaded(false);
     api<DraftPage>(base)
       .then((page) => {
         if (live) {
@@ -180,7 +183,10 @@ export function RetainedDrafts({ task }: { task: string }) {
           );
       })
       .finally(() => {
-        if (live) setBusy(false);
+        if (live) {
+          setBusy(false);
+          setLoaded(true);
+        }
       });
     return () => {
       live = false;
@@ -245,11 +251,31 @@ export function RetainedDrafts({ task }: { task: string }) {
       if (generation.current === epoch) setBusy(false);
     }
   };
+  if (!error && !loaded)
+    return (
+      <section className="retained-drafts retained-loading" aria-label="留存的研究草稿">
+        <header>
+          <h2>阶段草稿</h2>
+        </header>
+        <p className="draft-loading" role="status">
+          <Spinner /> 正在读取留存草稿…
+        </p>
+      </section>
+    );
+  if (!error && !items.length)
+    return (
+      <div className="draft-empty" role="status" aria-label="留存的研究草稿">
+        <b>本次没有保存的检查草稿</b>
+        <p>
+          最终记录由本次执行直接生成，没有中途送检版本；这不表示研究已经通过核验。
+        </p>
+      </div>
+    );
   return (
     <section className="retained-drafts" aria-label="留存的研究草稿">
       <header>
-        <h2>阶段草稿</h2>
-        <p>保留每次送检版本及对应反馈，便于从已有工作继续核对。</p>
+        <h2>阶段草稿{items.length ? "（" + items.length + " 份）" : ""}</h2>
+        <p>保留每次送检版本及对应反馈，便于从已有工作继续核对；草稿不替代最终记录。</p>
       </header>
       {!!items.length && (
         <label className="draft-selector">
@@ -296,9 +322,6 @@ export function RetainedDrafts({ task }: { task: string }) {
             重新读取
           </button>
         </div>
-      )}
-      {!busy && !error && !items.length && (
-        <p>这次任务没有可回查的送检草稿。</p>
       )}
       {draft && draft.operation_id === selected?.operation_id && (
         <DraftContent

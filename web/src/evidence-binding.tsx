@@ -54,27 +54,62 @@ export function BindingSummary({
   );
 }
 
-export function TaskEvidenceBinding({
+export function TaskLineage({
   task,
   open,
-  revise,
+}: {
+  task: any;
+  open: (id: string) => void;
+}) {
+  if (!task.evidence_binding) return null;
+  return (
+    <div className="task-lineage">
+      <span>
+        资料关联：使用了 {date(task.evidence_binding.created_at)} 保存的{" "}
+        {task.evidence_binding.receipt_count} 份阅读回执。
+      </span>
+      <button
+        className="text-button"
+        onClick={() => open(task.evidence_binding.source_run_id)}
+      >
+        查看源任务
+      </button>
+    </div>
+  );
+}
+
+// Manual association is deliberately secondary. It exists only for a task that
+// already produced a report, is closed by default and is never offered for a
+// failed task without a report (there is no report to supplement).
+export function TaskEvidencePanel({
+  task,
+  open,
   refresh,
 }: {
   task: any;
   open: (id: string) => void;
-  revise: () => void;
   refresh: () => void;
 }) {
   const [sourceID, setSourceID] = useState("");
   const [source, setSource] = useState<any>(null);
+  const [receipts, setReceipts] = useState<number | null>(null);
   const [reason, setReason] = useState("补充既有报告的来源关联");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
   const terminal = ["completed", "failed", "cancelled"].includes(task.status);
+  if (task.evidence_binding)
+    return (
+      <section className="evidence-lineage" aria-label="资料关联">
+        <BindingSummary binding={task.evidence_binding} open={open} />
+      </section>
+    );
+  if (!terminal || !task.result) return null;
   const inspect = async () => {
     setBusy(true);
     setError("");
     setSource(null);
+    setReceipts(null);
     try {
       const value = await api<any>(
         "/tasks/" + encodeURIComponent(sourceID.trim()),
@@ -83,9 +118,17 @@ export function TaskEvidenceBinding({
         !value ||
         value.id !== sourceID.trim() ||
         !/^[a-f0-9]{64}$/.test(value.result_sha256 || "") ||
-        !["completed", "failed", "cancelled"].includes(value.status)
+        !["completed", "failed", "cancelled"].includes(value.status) ||
+        value.commodity !== task.commodity
       )
-        throw new Error("需要已结束且支持版本核对的源任务。");
+        throw new Error("需要同一品种、已结束且支持版本核对的源任务。");
+      const page = await api<{ items: any[] }>(
+        "/tasks/" +
+          encodeURIComponent(value.id) +
+          "/sources?limit=1",
+      ).catch(() => null);
+      const count = page && Array.isArray(page.items) ? page.items.length : 0;
+      setReceipts(count);
       setSource(value);
     } catch (e) {
       setError((e as Error).message);
@@ -103,6 +146,7 @@ export function TaskEvidenceBinding({
         expected_source_result_sha256: source.result_sha256,
         reason: reason.trim(),
       });
+      setSaved(true);
       refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -111,77 +155,78 @@ export function TaskEvidenceBinding({
     }
   };
   return (
-    <section className="evidence-lineage" aria-label="修订与证据来源">
-      {task.evidence_binding ? (
-        <BindingSummary binding={task.evidence_binding} open={open} />
-      ) : (
-        terminal && (
-          <details className="source-task">
-            <summary>为旧报告补充证据关联</summary>
-            <p>
-              选择实际提供原文的较早任务。保存后关联固定版本且不可替换，原报告和执行记录不改写。
-            </p>
-            <div className="button-row">
-              <input
-                aria-label="证据源任务 ID"
-                value={sourceID}
-                disabled={busy}
-                placeholder="源任务完整 ID"
-                onChange={(e) => {
-                  setSourceID(e.target.value);
-                  setSource(null);
-                  setError("");
-                }}
-              />
-              <button
-                className="text-button"
-                disabled={
-                  busy ||
-                  !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(sourceID.trim()) ||
-                  sourceID.trim() === task.id
-                }
-                onClick={() => void inspect()}
-              >
-                核对源任务
-              </button>
-            </div>
-            {source && (
-              <div>
-                <p>
-                  {source.commodity || "研究"} · {date(source.created_at)} ·{" "}
-                  {source.id}
-                </p>
-                <button className="text-button" onClick={() => open(source.id)}>
-                  查看源报告
-                </button>
-                <label>
-                  关联原因
-                  <input
-                    aria-label="关联原因"
-                    value={reason}
-                    maxLength={500}
-                    disabled={busy}
-                    onChange={(e) => setReason(e.target.value)}
-                  />
-                </label>
-                <button
-                  className="text-button"
-                  disabled={busy || !reason.trim()}
-                  onClick={() => void bind()}
-                >
-                  保存证据关联
-                </button>
-              </div>
-            )}
-            {error && <p role="alert">{error}</p>}
-          </details>
-        )
-      )}
-      {terminal && task.result && (
-        <button className="text-button" onClick={revise}>
-          基于此报告发起修订
+    <details className="source-task evidence-more">
+      <summary>关联已有研究资料（高级：按编号查找）</summary>
+      <p>
+        常规阅读不需要这一步。首版没有可靠的候选任务查询；只有明确知道来源任务编号时才使用。
+        已有关联不能更换。关联后可回看这次研究保存的原文；保存后不能更换资料来源；原报告保持原样。
+      </p>
+      <div className="button-row">
+        <input
+          aria-label="证据源任务 ID"
+          value={sourceID}
+          disabled={busy}
+          placeholder="源任务完整 ID"
+          onChange={(e) => {
+            setSourceID(e.target.value);
+            setSource(null);
+            setReceipts(null);
+            setError("");
+            setSaved(false);
+          }}
+        />
+        <button
+          className="text-button"
+          disabled={
+            busy ||
+            !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(sourceID.trim()) ||
+            sourceID.trim() === task.id
+          }
+          onClick={() => void inspect()}
+        >
+          按编号查找
         </button>
+      </div>
+      {source && (
+        <div className="evidence-candidate">
+          <p>
+            {source.commodity || "研究"} · {date(source.created_at)} ·{" "}
+            <span className="wrap-anywhere">{source.id}</span>
+          </p>
+          <p>
+            {receipts
+              ? "该任务有已保存的阅读记录，可作为来源候选。"
+              : "该任务没有已保存的阅读记录，不能作为来源。"}
+          </p>
+          <button className="text-button" onClick={() => open(source.id)}>
+            查看源报告
+          </button>
+          <label>
+            关联原因
+            <input
+              aria-label="关联原因"
+              value={reason}
+              maxLength={500}
+              disabled={busy}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </label>
+          <p className="evidence-warning">
+            关联后可回看这次研究保存的原文。保存后不能更换资料来源；原报告保持原样。
+          </p>
+          <button
+            className="button"
+            disabled={busy || !reason.trim() || !receipts || saved}
+            onClick={() => void bind()}
+          >
+            {saved ? "已保存关联" : "保存证据关联"}
+          </button>
+        </div>
       )}
-    </section>
+      {saved && (
+        <p role="status">关联已保存；原报告和执行记录没有改写。</p>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </details>
   );
 }

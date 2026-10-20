@@ -83,6 +83,7 @@ function report(): ReportCheck {
 test("structured report preserves historical estimate labels and renders source as text", () => {
   const html = renderToStaticMarkup(
     <CheckedReport
+      instance="final:task-a"
       check={report()}
       raw={'{"test":true}'}
       onSource={() => {}}
@@ -110,7 +111,7 @@ test("failed comparison never displays a calculated quantity or verified badge",
     { path: "facts.f", code: "anchor", message: "原文不支持字段关系" },
   ];
   const html = renderToStaticMarkup(
-    <CheckedReport check={check} raw="raw" onSource={() => {}} />,
+    <CheckedReport instance="final:task-a" check={check} raw="raw" onSource={() => {}} />,
   );
   assert.match(html, /暂不用于比较/);
   assert.match(html, /未计算差额/);
@@ -126,7 +127,7 @@ test("old answer remains readable but explicitly unverified", () => {
     { path: "report", code: "format", message: "未符合结构化资料格式" },
   ];
   const html = renderToStaticMarkup(
-    <CheckedReport check={check} raw="历史回答原文" onSource={() => {}} />,
+    <CheckedReport instance="final:task-a" check={check} raw="历史回答原文" onSource={() => {}} />,
   );
   assert.match(html, /历史回答原文/);
   assert.match(html, /运行完成不等于研究核验完成/);
@@ -157,14 +158,14 @@ test("AI candidates and unknown periods remain readable without a fabricated cal
     },
   ];
   const html = renderToStaticMarkup(
-    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+    <CheckedReport instance="final:task-a" check={check} raw="original" onSource={() => {}} />,
   );
   assert.match(html, /AI 摘要线索 · 未确认/);
   assert.match(html, /统计期未确认/);
   assert.match(html, /统计日期尚未确认/);
   assert.match(html, /目前仅取得摘要线索/);
   assert.match(html, /证据边界/);
-  assert.match(html, /href="#report-fact-f"/);
+  assert.match(html, /href="#report-final-task-a-fact-f"/);
   assert.match(html, /回查任务当时保存的资料/);
   assert.doesNotMatch(html, /2026-09-01|<img|结构与留存引用检查一致/);
 });
@@ -204,12 +205,12 @@ test("qualitative statements remain reviewable prose and reopen retained receipt
     },
   ];
   const html = renderToStaticMarkup(
-    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+    <CheckedReport instance="final:task-a" check={check} raw="original" onSource={() => {}} />,
   );
   assert.match(html, /原文说明与来源边界/);
   assert.match(html, /AI 摘要线索 · 未确认/);
   assert.match(html, /只能确认摘要这样表述/);
-  assert.match(html, /href="#report-statement-s1"/);
+  assert.match(html, /href="#report-final-task-a-statement-s1"/);
   assert.match(html, /回查任务当时保存的资料/);
   assert.match(html, /引文匹配不等于解释、样本或范围已经验证/);
   assert.doesNotMatch(html, /事实已核实|结构与留存引用检查一致/);
@@ -237,7 +238,7 @@ test("invalid statement IDs still show their issue on the statement card", () =>
     },
   ];
   const html = renderToStaticMarkup(
-    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+    <CheckedReport instance="final:task-a" check={check} raw="original" onSource={() => {}} />,
   );
   assert.match(html, /说明编号无效/);
 });
@@ -259,7 +260,7 @@ test("invalid optional arrays cannot crash the report projection", () => {
     },
   ];
   const html = renderToStaticMarkup(
-    <CheckedReport check={check} raw="original" onSource={() => {}} />,
+    <CheckedReport instance="final:task-a" check={check} raw="original" onSource={() => {}} />,
   );
   assert.match(html, /来源性质未确认/);
   assert.match(html, /类型待核/);

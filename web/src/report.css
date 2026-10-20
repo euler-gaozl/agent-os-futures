@@ -280,3 +280,24 @@
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
+
+.draft-loading {
+  margin: 0;
+  padding: 18px 24px;
+  color: #64736c;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.draft-empty {
+  padding: 16px 24px;
+  color: #64736c;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.draft-empty b { display: block; color: #263c32; font-size: 13px; margin-bottom: 4px; }
+.draft-empty p { margin: 0; }
+@media (max-width: 560px) {
+  .draft-loading, .draft-empty { padding: 14px 16px; }
+}

@@ -4,7 +4,7 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   BindingSummary,
-  TaskEvidenceBinding,
+  TaskEvidencePanel,
   type EvidenceBinding,
 } from "../src/evidence-binding";
 
@@ -28,15 +28,10 @@ test("retrospective binding distinguishes original reading and does not promise 
   assert.match(html, /固定版本/);
   assert.match(html, new RegExp(binding.manifest_sha256));
 });
-test("existing association cannot be replaced in UI and running tasks cannot be linked", () => {
+test("manual association is secondary, closed by default and never offered without a report", () => {
   const render = (task: any) =>
     renderToStaticMarkup(
-      <TaskEvidenceBinding
-        task={task}
-        open={() => {}}
-        revise={() => {}}
-        refresh={() => {}}
-      />,
+      <TaskEvidencePanel task={task} open={() => {}} refresh={() => {}} />,
     );
   const existing = render({
     id: "target",
@@ -44,14 +39,17 @@ test("existing association cannot be replaced in UI and running tasks cannot be 
     result: "report",
     evidence_binding: binding,
   });
-  assert.doesNotMatch(existing, /核对源任务/);
-  assert.match(existing, /基于此报告发起修订/);
-  assert.doesNotMatch(
-    render({ id: "target", status: "running" }),
-    /补充证据关联/,
-  );
-  assert.match(
-    render({ id: "target", status: "completed" }),
-    /保存后关联固定版本且不可替换/,
-  );
+  assert.match(existing, /事后补充的证据关联/);
+  assert.doesNotMatch(existing, /按编号查找|保存后不能更换资料来源/);
+  assert.doesNotMatch(existing, /发起修订/);
+  // A failed task without a report has nothing to supplement.
+  assert.equal(render({ id: "target", status: "failed", result: "" }), "");
+  assert.equal(render({ id: "target", status: "running" }), "");
+  // A report task exposes only a closed advanced entry.
+  const advanced = render({ id: "target", status: "completed", result: "report" });
+  assert.match(advanced, /<details/);
+  assert.match(advanced, /关联已有研究资料（高级：按编号查找）/);
+  assert.match(advanced, /首版没有可靠的候选任务查询/);
+  assert.doesNotMatch(advanced, /<details open/);
+  assert.match(advanced, /保存后不能更换资料来源；原报告保持原样/);
 });

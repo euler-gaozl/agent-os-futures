@@ -156,15 +156,25 @@ const measure: Record<string, string> = {
   ratio: "比率",
   commitment: "未执行合同",
 };
+// One task page can render the final record and several historical drafts at
+// once. Every citation and every target carries the instance namespace so a
+// click can never jump into another version's fact or statement.
+export function anchorID(instance: string, kind: "fact" | "statement", id: string) {
+  const ns = instance.replace(/[^A-Za-z0-9_-]/g, "-");
+  return "report-" + ns + "-" + kind + "-" + id.replace(/[^A-Za-z0-9_-]/g, "-");
+}
+
 export function CheckedReport({
   check,
   raw,
   onSource,
+  instance,
   rawLabel = "原始模型输出（完整保留）",
 }: {
   check: ReportCheck;
   raw: string;
   onSource: OpenSource;
+  instance: string;
   rawLabel?: string;
 }) {
   const report = check.report;
@@ -223,12 +233,12 @@ export function CheckedReport({
                         <p>{finding.text}</p>
                         <div className="fact-links">
                           {finding.fact_ids?.map((id) => (
-                            <a key={id} href={"#report-fact-" + id}>
+                            <a key={id} href={"#" + anchorID(instance, "fact", id)}>
                               依据 {id}
                             </a>
                           ))}
                           {finding.statement_ids?.map((id) => (
-                            <a key={id} href={"#report-statement-" + id}>
+                            <a key={id} href={"#" + anchorID(instance, "statement", id)}>
                               原文说明 {id}
                             </a>
                           ))}
@@ -239,12 +249,12 @@ export function CheckedReport({
                 )}
                 <div className="fact-links">
                   {q.fact_ids.map((id) => (
-                    <a key={id} href={"#report-fact-" + id}>
+                    <a key={id} href={"#" + anchorID(instance, "fact", id)}>
                       资料 {id}
                     </a>
                   ))}
                   {q.statement_ids?.map((id) => (
-                    <a key={id} href={"#report-statement-" + id}>
+                    <a key={id} href={"#" + anchorID(instance, "statement", id)}>
                       原文说明 {id}
                     </a>
                   ))}
@@ -277,7 +287,7 @@ export function CheckedReport({
               );
               return (
                 <article
-                  id={"report-fact-" + f.id}
+                  id={anchorID(instance, "fact", f.id)}
                   key={f.id + ":" + n}
                   className={
                     state?.consistent ? "fact-card" : "fact-card needs-review"
@@ -417,7 +427,7 @@ export function CheckedReport({
                   );
                   return (
                     <article
-                      id={"report-statement-" + s.id}
+                      id={anchorID(instance, "statement", s.id)}
                       key={s.id + ":" + n}
                       className={
                         "fact-card statement-card" +
@@ -538,10 +548,12 @@ export function ReportReview({
   task,
   raw,
   onSource,
+  instance,
 }: {
   task: string;
   raw: string;
   onSource: OpenSource;
+  instance: string;
 }) {
   const [check, setCheck] = useState<ReportCheck | null>(null),
     [draftMatch, setDraftMatch] = useState<DraftMatch | null>(null),
@@ -603,7 +615,58 @@ export function ReportReview({
           重新核对送检稿
         </button>
       )}
-      <CheckedReport check={check} raw={raw} onSource={onSource} />
+      <CheckedReport check={check} raw={raw} onSource={onSource} instance={instance} />
     </>
+  );
+}
+
+// A compact, independent evidence-check status for the task header. Execution
+// completion and research verification are different facts; this chip reads
+// only the check projection and never changes the record.
+export function EvidenceCheckChip({ task, raw }: { task: string; raw: string }) {
+  const [state, setState] = useState<{
+    check: ReportCheck | null;
+    error: boolean;
+  }>({ check: null, error: false });
+  useEffect(() => {
+    let live = true;
+    setState({ check: null, error: false });
+    api<ReportCheck>("/tasks/" + encodeURIComponent(task) + "/report-check")
+      .then((value) => {
+        if (live) setState({ check: value, error: false });
+      })
+      .catch(() => {
+        if (live) setState({ check: null, error: true });
+      });
+    return () => {
+      live = false;
+    };
+  }, [task, raw]);
+  if (state.error)
+    return (
+      <span className="evidence-chip unavailable" role="status">
+        证据检查：暂不可用
+      </span>
+    );
+  if (!state.check)
+    return (
+      <span className="evidence-chip loading" role="status">
+        证据检查：正在读取…
+      </span>
+    );
+  const consistent = state.check.status === "consistent";
+  return (
+    <span
+      className={"evidence-chip " + (consistent ? "consistent" : "pending")}
+      role="status"
+      title="执行完成不等于研究核验通过；检查只覆盖结构与留存引用。"
+    >
+      证据检查：
+      {consistent
+        ? "结构与留存引用一致"
+        : state.check.issues?.length
+          ? state.check.issues.length + " 项待核"
+          : "仍有待核项"}
+    </span>
   );
 }

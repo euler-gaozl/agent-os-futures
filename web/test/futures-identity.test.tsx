@@ -158,20 +158,38 @@ test("the real Futures parent keeps one evidence section across ten parent refre
     await settle(8);
     const failedDetail = container.querySelector(".research-result header h1");
     assert.match(failedDetail?.textContent || "", /豆粕/);
-    assert.equal(container.querySelectorAll(".evidence-lineage").length, 1);
+    assert.equal(container.querySelectorAll(".task-outcome").length, 1);
+    assert.equal(container.querySelectorAll(".task-actions").length, 1);
+
+    clickButton((t) => t.includes("查看生成过程"));
+    await settle(6);
+    assert.equal(container.querySelectorAll(".generation-panel").length, 1);
+    assert.equal(
+      container.querySelectorAll(".draft-empty").length,
+      1,
+      "zero saved drafts stay one compact line",
+    );
 
     for (let i = 0; i < 10; i++) {
       assert.equal(intervals.size, 1, "refresh-" + i + " keeps one interval");
       for (const run of [...intervals.values()]) run();
       await settle(3);
-      const count = container.querySelectorAll(".evidence-lineage").length;
-      assert.equal(count, 1, "refresh-" + i + " must not append a section");
+      assert.equal(
+        container.querySelectorAll(".task-outcome").length,
+        1,
+        "refresh-" + i + " must not append a failure panel",
+      );
+      assert.equal(
+        container.querySelectorAll(".generation-panel").length,
+        1,
+        "refresh-" + i + " must not append a generation panel",
+      );
+      assert.equal(
+        container.querySelectorAll(".draft-empty").length,
+        1,
+        "refresh-" + i + " must not append a draft line",
+      );
     }
-    assert.equal(
-      container.querySelectorAll(".retained-drafts").length,
-      1,
-      "one retained-work panel",
-    );
 
     clickButton((t) => t.includes("甲醇"));
     await settle(8);
@@ -179,13 +197,14 @@ test("the real Futures parent keeps one evidence section across ten parent refre
       container.querySelector(".research-result header h1")?.textContent || "",
       /甲醇/,
     );
-    assert.equal(container.querySelectorAll(".evidence-lineage").length, 1);
+    assert.equal(container.querySelectorAll(".task-outcome").length, 0);
+    assert.equal(container.querySelectorAll(".research-document").length, 1);
+    assert.equal(container.querySelectorAll(".generation-panel").length, 0);
     assert.equal(
-      container.querySelectorAll(".retained-drafts").length,
+      container.querySelectorAll(".task-actions").length,
       1,
-      "switching tasks does not leave the previous retained-work panel",
+      "one action area per task",
     );
-    assert.doesNotMatch(container.textContent || "", /这次研究还未完成/);
     assert.equal(
       errors.filter((e) => /same key|Encountered two children/i.test(e)).length,
       0,
