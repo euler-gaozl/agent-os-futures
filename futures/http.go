@@ -35,6 +35,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	s.reportRoute(mux)
 	s.draftRoutes(mux)
 	s.draftMatchRoute(mux)
+	s.diagnosticsRoutes(mux)
 	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
 		webproxy.Proxy(w, r, s.Client.RegistryURL+"/v1/published/futures", s.Client.Token)
 	})
@@ -147,4 +148,9 @@ func project(row map[string]any) {
 		row["report_format"] = m["report_format"]
 	}
 	delete(row, "metadata")
+	// Never forward Runtime's raw exception text to the browser. Known signals
+	// keep their fixed labels; everything else becomes one generic message.
+	if raw, ok := row["error"].(string); ok {
+		row["error"] = safeTaskError(raw)
+	}
 }
