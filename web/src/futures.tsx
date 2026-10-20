@@ -6,9 +6,11 @@ import { taskReadReducer, watchTask } from "./task-polling";
 import { taskSectionKeys } from "./task-keys";
 import { TaskEvidencePanel } from "./evidence-binding";
 import { TaskFailureView } from "./failure-view";
+import { FailureRecords } from "./failure-records";
 import { EvidenceCheckChip } from "./report";
 import { useTaskDiagnostics } from "./diagnostics";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowUp,
   ArrowUpRight,
@@ -125,6 +127,7 @@ export function Futures() {
     [historySearch, setHistorySearch] = useState(""),
     [revisionSource, setRevisionSource] = useState(""),
     [processOpen, setProcessOpen] = useState(false),
+    [errorsOpen, setErrorsOpen] = useState(false),
     [authRequired, setAuthRequired] = useState(false);
   const [{ result, error: readError, reading }, dispatchRead] = useReducer(
     taskReadReducer<any>,
@@ -189,6 +192,7 @@ export function Futures() {
   const fresh = () => {
     setSelected("");
     setRevisionSource("");
+    setErrorsOpen(false);
     setMobileNav(false);
     key.current = crypto.randomUUID();
   };
@@ -211,6 +215,7 @@ export function Futures() {
         key.current,
       );
       setSelected(r.id);
+      setErrorsOpen(false);
       key.current = crypto.randomUUID();
       await load();
     } catch (e) {
@@ -241,9 +246,21 @@ export function Futures() {
         开始新研究<span>↗</span>
       </button>
       <div className="research-nav">
-        <button className={!selected ? "active" : ""} onClick={fresh}>
+        <button className={!selected && !errorsOpen ? "active" : ""} onClick={fresh}>
           <Compass size={17} />
           研究工作台
+        </button>
+        <button
+          className={errorsOpen ? "active" : ""}
+          aria-current={errorsOpen ? "page" : undefined}
+          onClick={() => {
+            setSelected("");
+            setErrorsOpen(true);
+            setMobileNav(false);
+          }}
+        >
+          <AlertTriangle size={17} />
+          错误记录
         </button>
         <div className="history-label">
           研究记录 <span>{tasks.length}</span>
@@ -271,6 +288,7 @@ export function Futures() {
                   className={selected === t.id ? "selected" : ""}
                   onClick={() => {
                     setSelected(t.id);
+                    setErrorsOpen(false);
                     setMobileNav(false);
                   }}
                 >
@@ -421,7 +439,13 @@ export function Futures() {
           >
             <Menu size={19} />
           </button>
-          <span>{selected ? "研究任务" : "中国期货 · 基本面研究"}</span>
+          <span>
+            {errorsOpen
+              ? "错误记录"
+              : selected
+                ? "研究任务"
+                : "中国期货 · 基本面研究"}
+          </span>
           <div>
             <span className="workspace-label">
               <i />
@@ -443,7 +467,14 @@ export function Futures() {
             </button>
           </div>
         )}
-        {!selected ? (
+        {errorsOpen ? (
+          <FailureRecords
+            onOpen={(id) => {
+              setSelected(id);
+              setErrorsOpen(false);
+            }}
+          />
+        ) : !selected ? (
           <main className="research-home" id="research-content" tabIndex={-1}>
             <div className="research-greeting">
               <span /> 你的基本面研究工作台
